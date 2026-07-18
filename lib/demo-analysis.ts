@@ -1,5 +1,6 @@
 import { VIDEO_DURATION_RANGE } from "@/lib/constants";
-import { type AnalysisRequest, type TutorialAnalysis, tutorialAnalysisSchema } from "@/lib/tutorial-schema";
+import { type AnalysisRequest } from "@/lib/analysis-contract";
+import { type TutorialAnalysis, tutorialAnalysisSchema } from "@/lib/tutorial-schema";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));

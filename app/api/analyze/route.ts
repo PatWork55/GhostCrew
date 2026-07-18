@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
 import { SUPPORTED_VIDEO_TYPES, VIDEO_DURATION_RANGE } from "@/lib/constants";
+import { analysisRequestSchema } from "@/lib/analysis-contract";
 import { generateDemoAnalysis } from "@/lib/demo-analysis";
-import { analysisRequestSchema, tutorialAnalysisSchema } from "@/lib/tutorial-schema";
+import { tutorialAnalysisSchema } from "@/lib/tutorial-schema";
 
 export async function POST(request: Request) {
   try {
     const payload = analysisRequestSchema.parse(await request.json());
-    const { durationSeconds, type } = payload.video;
+    const { durationSeconds, mimeType } = payload.video;
 
-    if (!SUPPORTED_VIDEO_TYPES.includes(type as (typeof SUPPORTED_VIDEO_TYPES)[number])) {
+    if (
+      !SUPPORTED_VIDEO_TYPES.includes(
+        mimeType as (typeof SUPPORTED_VIDEO_TYPES)[number]
+      )
+    ) {
       return NextResponse.json(
         { error: "Only MP4 and WebM videos are supported in this MVP." },
         { status: 400 }

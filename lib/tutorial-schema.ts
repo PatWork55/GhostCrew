@@ -28,19 +28,6 @@ export const tutorialAnalysisSchema = z.object({
   steps: z.array(tutorialStepSchema).min(3).max(6)
 });
 
-export const analysisRequestSchema = z.object({
-  taskTitle: z.string().trim().min(2).max(80),
-  description: z.string().trim().max(500).optional(),
-  language: z.string().trim().min(2).max(40),
-  video: z.object({
-    name: z.string().min(1),
-    size: z.number().int().positive(),
-    type: z.string().min(1),
-    durationSeconds: z.number().positive()
-  })
-});
-
 export type TutorialAnalysis = z.infer<typeof tutorialAnalysisSchema>;
 export type TutorialStep = z.infer<typeof tutorialStepSchema>;
 export type Treatment = z.infer<typeof treatmentSchema>;
-export type AnalysisRequest = z.infer<typeof analysisRequestSchema>;

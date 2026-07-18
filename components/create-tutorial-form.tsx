@@ -1,19 +1,68 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useState } from "react";
+import { buildAnalysisRequest } from "@/lib/analysis-contract";
+import { FRAME_EXTRACTION_LIMITS, PROJECT, SUPPORTED_VIDEO_TYPES, VIDEO_DURATION_RANGE, VIDEO_UPLOAD_LIMITS } from "@/lib/constants";
 import { formatDuration, formatFileSize } from "@/lib/format";
-import { PROJECT, SUPPORTED_VIDEO_TYPES, VIDEO_DURATION_RANGE } from "@/lib/constants";
+import { FrameReviewStrip } from "@/components/frame-review-strip";
 import { StoryboardEditor } from "@/components/storyboard-editor";
 import { StatusPill } from "@/components/status-pill";
 import { TutorialPreview } from "@/components/tutorial-preview";
+import { useSourceVideoPipeline } from "@/hooks/use-source-video-pipeline";
 import type { TutorialAnalysis } from "@/lib/tutorial-schema";
-import type { TutorialStatus } from "@/types/tutorial";
-
-type VideoMetadata = {
-  durationSeconds: number;
-};
+import type { AnalysisStatus, SourceVideoStatus } from "@/types/tutorial";
 
 const DEFAULT_LANGUAGE = "English";
+
+function getSourceStatusMessage(
+  sourceStatus: SourceVideoStatus,
+  error: string,
+  selectedFrameCount: number
+) {
+  switch (sourceStatus) {
+    case "idle":
+      return "Upload a short MP4 or WebM source clip to begin preprocessing.";
+    case "loading_video":
+      return "Loading source video...";
+    case "extracting_metadata":
+      return "Reading filename, dimensions, duration, and aspect ratio...";
+    case "extracting_frames":
+      return "Extracting representative frames directly in the browser...";
+    case "ready_for_analysis":
+      return selectedFrameCount
+        ? `${selectedFrameCount} selected frames are ready for the storyboard request.`
+        : "Select at least one extracted frame before analysis.";
+    case "error":
+      return error || "GhostCrew could not preprocess this clip.";
+    default:
+      return "Preparing source video...";
+  }
+}
+
+function getPrimaryStatusLabel(sourceStatus: SourceVideoStatus, analysisStatus: AnalysisStatus) {
+  if (analysisStatus === "submitting") {
+    return "analysis in progress";
+  }
+
+  if (analysisStatus === "ready") {
+    return "storyboard ready";
+  }
+
+  switch (sourceStatus) {
+    case "loading_video":
+      return "loading video";
+    case "extracting_metadata":
+      return "metadata extraction";
+    case "extracting_frames":
+      return "frame extraction";
+    case "ready_for_analysis":
+      return "ready for analysis";
+    case "error":
+      return "retry available";
+    default:
+      return "demo analysis";
+  }
+}
 
 export function CreateTutorialForm() {
   const [taskTitle, setTaskTitle] = useState("Assemble a phone stand");
@@ -21,96 +70,66 @@ export function CreateTutorialForm() {
     "A quick one-angle phone video showing how to unfold and lock a small desk phone stand."
   );
   const [language, setLanguage] = useState(DEFAULT_LANGUAGE);
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState("");
-  const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
-  const [error, setError] = useState("");
-  const [status, setStatus] = useState<TutorialStatus>("idle");
+  const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>("idle");
+  const [analysisError, setAnalysisError] = useState("");
   const [analysis, setAnalysis] = useState<TutorialAnalysis | null>(null);
-  const previewRef = useRef<HTMLVideoElement | null>(null);
+  const {
+    file,
+    previewUrl,
+    sourceVideo,
+    status: sourceStatus,
+    error: sourceError,
+    selectedFrames,
+    selectFile,
+    reExtractFrames,
+    toggleFrameSelection,
+    removeFrame
+  } = useSourceVideoPipeline();
 
-  useEffect(() => {
-    if (!videoFile) {
-      setPreviewUrl("");
-      setMetadata(null);
+  const selectedFrameCount = selectedFrames.length;
+  const sourceStatusMessage = getSourceStatusMessage(
+    sourceStatus,
+    sourceError,
+    selectedFrameCount
+  );
+  const activeError = analysisStatus === "error" ? analysisError : sourceError;
+  const canAnalyze =
+    sourceStatus === "ready_for_analysis" &&
+    selectedFrameCount > 0 &&
+    analysisStatus !== "submitting";
+  const showVideoPreview =
+    Boolean(previewUrl) &&
+    Boolean(file) &&
+    SUPPORTED_VIDEO_TYPES.includes((file?.type ?? "") as (typeof SUPPORTED_VIDEO_TYPES)[number]);
+
+  async function submitAnalysisRequest() {
+    if (analysisStatus === "submitting") {
       return;
     }
 
-    const objectUrl = URL.createObjectURL(videoFile);
-    setPreviewUrl(objectUrl);
-
-    return () => {
-      URL.revokeObjectURL(objectUrl);
-    };
-  }, [videoFile]);
-
-  const fileValidation = useMemo(() => {
-    if (!videoFile) {
-      return { ok: false, message: "Upload a short MP4 or WebM source clip to begin." };
-    }
-
-    if (!SUPPORTED_VIDEO_TYPES.includes(videoFile.type as (typeof SUPPORTED_VIDEO_TYPES)[number])) {
-      return { ok: false, message: "Only MP4 and WebM are supported in this MVP." };
-    }
-
-    if (!metadata) {
-      return { ok: false, message: "Reading source-video metadata..." };
-    }
-
-    if (metadata.durationSeconds < VIDEO_DURATION_RANGE.minSeconds) {
-      return {
-        ok: false,
-        message: `Video is too short. Use at least ${VIDEO_DURATION_RANGE.minSeconds} seconds.`
-      };
-    }
-
-    if (metadata.durationSeconds > VIDEO_DURATION_RANGE.maxSeconds) {
-      return {
-        ok: false,
-        message: `Video is too long. Keep it under ${VIDEO_DURATION_RANGE.maxSeconds} seconds.`
-      };
-    }
-
-    return { ok: true, message: "Source clip is valid and ready for analysis." };
-  }, [metadata, videoFile]);
-
-  async function handleAnalyze(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError("");
-
-    if (!videoFile || !metadata) {
-      setStatus("error");
-      setError("Select a video and wait for metadata before starting analysis.");
+    if (!sourceVideo) {
+      setAnalysisStatus("error");
+      setAnalysisError("Upload a valid source video before analysis.");
       return;
     }
-
-    if (!fileValidation.ok) {
-      setStatus("error");
-      setError(fileValidation.message);
-      return;
-    }
-
-    setStatus("analyzing");
 
     try {
+      const request = buildAnalysisRequest({
+        taskTitle,
+        description,
+        language,
+        sourceVideo
+      });
+
+      setAnalysisError("");
+      setAnalysisStatus("submitting");
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          taskTitle,
-          description,
-          language,
-          video: {
-            name: videoFile.name,
-            size: videoFile.size,
-            type: videoFile.type,
-            durationSeconds: metadata.durationSeconds
-          }
-        })
+        body: JSON.stringify(request)
       });
-
       const payload = (await response.json()) as {
         analysis?: TutorialAnalysis;
         error?: string;
@@ -121,10 +140,10 @@ export function CreateTutorialForm() {
       }
 
       setAnalysis(payload.analysis);
-      setStatus("ready");
+      setAnalysisStatus("ready");
     } catch (requestError) {
-      setStatus("error");
-      setError(
+      setAnalysisStatus("error");
+      setAnalysisError(
         requestError instanceof Error
           ? requestError.message
           : "The analysis request failed. Try again with a different clip."
@@ -132,60 +151,16 @@ export function CreateTutorialForm() {
     }
   }
 
-  function handleVideoMetadata(event: React.SyntheticEvent<HTMLVideoElement>) {
-    const element = event.currentTarget;
-    const durationSeconds = Number.isFinite(element.duration) ? element.duration : 0;
+  async function handleAnalyze(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
 
-    if (!durationSeconds) {
+    if (!canAnalyze) {
+      setAnalysisStatus("error");
+      setAnalysisError(sourceStatusMessage);
       return;
     }
 
-    setMetadata({ durationSeconds });
-  }
-
-  function handleRegenerate() {
-    if (!videoFile || !metadata) {
-      return;
-    }
-
-    void fetch("/api/analyze", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        taskTitle,
-        description,
-        language,
-        video: {
-          name: videoFile.name,
-          size: videoFile.size,
-          type: videoFile.type,
-          durationSeconds: metadata.durationSeconds
-        }
-      })
-    })
-      .then(async (response) => {
-        const payload = (await response.json()) as {
-          analysis?: TutorialAnalysis;
-          error?: string;
-        };
-
-        if (!response.ok || !payload.analysis) {
-          throw new Error(payload.error ?? "Analysis failed");
-        }
-
-        setAnalysis(payload.analysis);
-        setStatus("ready");
-      })
-      .catch((requestError) => {
-        setStatus("error");
-        setError(
-          requestError instanceof Error
-            ? requestError.message
-            : "Could not regenerate the demo analysis."
-        );
-      });
+    await submitAnalysisRequest();
   }
 
   return (
@@ -202,13 +177,19 @@ export function CreateTutorialForm() {
               </p>
               <h1 className="mt-2 text-4xl font-semibold text-white">{PROJECT.tagline}</h1>
               <p className="mt-3 max-w-2xl text-base text-white/68">
-                Upload a rough 10 to 45 second source clip, describe the task, and let GhostCrew
-                turn it into an instructional storyboard.
+                Upload a rough 10 to 45 second source clip, extract representative frames, and
+                prepare a validated storyboard request without sending raw video to the server yet.
               </p>
             </div>
             <StatusPill
-              label={status === "ready" ? "analysis ready" : "demo analysis"}
-              tone={status === "ready" ? "success" : "neutral"}
+              label={getPrimaryStatusLabel(sourceStatus, analysisStatus)}
+              tone={
+                sourceStatus === "error" || analysisStatus === "error"
+                  ? "warning"
+                  : analysisStatus === "ready" || sourceStatus === "ready_for_analysis"
+                    ? "success"
+                    : "neutral"
+              }
             />
           </div>
 
@@ -257,10 +238,10 @@ export function CreateTutorialForm() {
                   accept={SUPPORTED_VIDEO_TYPES.join(",")}
                   onChange={(event) => {
                     const nextFile = event.target.files?.[0] ?? null;
-                    setVideoFile(nextFile);
+                    selectFile(nextFile);
                     setAnalysis(null);
-                    setStatus("validating");
-                    setError("");
+                    setAnalysisStatus("idle");
+                    setAnalysisError("");
                   }}
                   className="block w-full rounded-2xl border border-dashed border-white/18 bg-black/25 px-4 py-[0.82rem] text-sm text-white/75 file:mr-4 file:rounded-full file:border-0 file:bg-accent file:px-4 file:py-2 file:text-sm file:font-medium file:text-black"
                 />
@@ -268,34 +249,49 @@ export function CreateTutorialForm() {
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/72">
-              <p className="text-white">{fileValidation.message}</p>
+              <p className="text-white">{sourceStatusMessage}</p>
               <p className="mt-2 text-white/58">
-                Supported formats: MP4 and WebM. Recommended demo task: a rough phone-stand
-                assembly clip with one quick motion and one small detail.
+                Supported formats: MP4 and WebM. Duration: {VIDEO_DURATION_RANGE.minSeconds} to{" "}
+                {VIDEO_DURATION_RANGE.maxSeconds} seconds. Max upload size:{" "}
+                {Math.round(VIDEO_UPLOAD_LIMITS.maxBytes / (1024 * 1024))} MB. Extracted frames
+                are resized to a maximum dimension of {FRAME_EXTRACTION_LIMITS.maxDimension}px.
               </p>
             </div>
 
-            {error ? (
+            {activeError ? (
               <div className="rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">
-                {error}
+                {activeError}
               </div>
             ) : null}
 
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="submit"
-                disabled={!fileValidation.ok || status === "analyzing"}
+                disabled={!canAnalyze}
                 className="rounded-full bg-accent px-5 py-3 text-sm font-medium text-black transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:bg-accent/50"
               >
-                {status === "analyzing" ? "Analyzing..." : "Start analysis"}
+                {analysisStatus === "submitting" ? "Analyzing..." : "Start analysis"}
               </button>
               <button
                 type="button"
-                onClick={handleRegenerate}
-                disabled={!analysis}
+                onClick={() => void submitAnalysisRequest()}
+                disabled={!sourceVideo || sourceStatus !== "ready_for_analysis" || analysisStatus === "submitting"}
                 className="rounded-full border border-white/12 px-5 py-3 text-sm text-white/78 transition hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
               >
                 Regenerate analysis
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAnalysis(null);
+                  setAnalysisStatus("idle");
+                  setAnalysisError("");
+                  void reExtractFrames();
+                }}
+                disabled={!sourceVideo || sourceStatus === "extracting_frames" || analysisStatus === "submitting"}
+                className="rounded-full border border-white/12 px-5 py-3 text-sm text-white/78 transition hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                {sourceStatus === "extracting_frames" ? "Extracting frames..." : "Re-extract frames"}
               </button>
             </div>
           </div>
@@ -304,45 +300,88 @@ export function CreateTutorialForm() {
         <div className="space-y-5">
           <div className="overflow-hidden rounded-[32px] border border-white/10 bg-black/35">
             <div className="border-b border-white/10 px-5 py-4">
-              <p className="text-sm font-medium uppercase tracking-[0.28em] text-white/55">
-                Source preview
-              </p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-medium uppercase tracking-[0.28em] text-white/55">
+                  Source preview
+                </p>
+                <StatusPill
+                  label={sourceStatus.replaceAll("_", " ")}
+                  tone={
+                    sourceStatus === "error"
+                      ? "warning"
+                      : sourceStatus === "ready_for_analysis"
+                        ? "success"
+                        : "neutral"
+                  }
+                />
+              </div>
             </div>
             <div className="p-5">
-              {previewUrl ? (
+              {showVideoPreview ? (
                 <div className="space-y-4">
                   <div className="overflow-hidden rounded-3xl border border-white/10 bg-black">
                     <video
-                      ref={previewRef}
                       src={previewUrl}
                       controls
                       preload="metadata"
-                      onLoadedMetadata={handleVideoMetadata}
                       className="aspect-video w-full bg-black object-contain"
                     />
                   </div>
-                  {videoFile ? (
-                    <div className="grid gap-3 sm:grid-cols-3">
+                  {sourceVideo?.metadata ? (
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                       <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                        <p className="text-xs uppercase tracking-[0.24em] text-white/40">Format</p>
-                        <p className="mt-2 text-sm text-white/76">{videoFile.type || "unknown"}</p>
+                        <p className="text-xs uppercase tracking-[0.24em] text-white/40">Filename</p>
+                        <p className="mt-2 truncate text-sm text-white/76">
+                          {sourceVideo.metadata.fileName}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                        <p className="text-xs uppercase tracking-[0.24em] text-white/40">MIME type</p>
+                        <p className="mt-2 text-sm text-white/76">{sourceVideo.metadata.mimeType}</p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                        <p className="text-xs uppercase tracking-[0.24em] text-white/40">File size</p>
+                        <p className="mt-2 text-sm text-white/76">
+                          {formatFileSize(sourceVideo.metadata.fileSizeBytes)}
+                        </p>
                       </div>
                       <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                         <p className="text-xs uppercase tracking-[0.24em] text-white/40">Duration</p>
                         <p className="mt-2 text-sm text-white/76">
-                          {metadata ? formatDuration(metadata.durationSeconds) : "Inspecting..."}
+                          {formatDuration(sourceVideo.metadata.durationSeconds)}
                         </p>
                       </div>
                       <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                        <p className="text-xs uppercase tracking-[0.24em] text-white/40">File size</p>
-                        <p className="mt-2 text-sm text-white/76">{formatFileSize(videoFile.size)}</p>
+                        <p className="text-xs uppercase tracking-[0.24em] text-white/40">Width</p>
+                        <p className="mt-2 text-sm text-white/76">{sourceVideo.metadata.width}px</p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                        <p className="text-xs uppercase tracking-[0.24em] text-white/40">Height</p>
+                        <p className="mt-2 text-sm text-white/76">{sourceVideo.metadata.height}px</p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                        <p className="text-xs uppercase tracking-[0.24em] text-white/40">Aspect ratio</p>
+                        <p className="mt-2 text-sm text-white/76">
+                          {sourceVideo.metadata.aspectRatioLabel} ({sourceVideo.metadata.aspectRatio}:1)
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                        <p className="text-xs uppercase tracking-[0.24em] text-white/40">
+                          Selected frames
+                        </p>
+                        <p className="mt-2 text-sm text-white/76">{selectedFrameCount}</p>
                       </div>
                     </div>
-                  ) : null}
+                  ) : (
+                    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/60">
+                      Metadata will appear here once extraction completes.
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="flex aspect-video items-center justify-center rounded-3xl border border-dashed border-white/12 bg-black/25 px-6 text-center text-sm text-white/52">
-                  Drop in a rough phone recording to inspect its metadata and start the storyboard analysis.
+                  Drop in a rough phone recording to inspect its metadata, extract review frames,
+                  and start the storyboard analysis.
                 </div>
               )}
             </div>
@@ -369,6 +408,31 @@ export function CreateTutorialForm() {
           </div>
         </div>
       </section>
+
+      <FrameReviewStrip
+        frames={sourceVideo?.frames ?? []}
+        selectedCount={selectedFrameCount}
+        status={sourceStatus}
+        error={sourceError}
+        onReExtract={() => {
+          setAnalysis(null);
+          setAnalysisStatus("idle");
+          setAnalysisError("");
+          void reExtractFrames();
+        }}
+        onToggleSelected={(frameId) => {
+          toggleFrameSelection(frameId);
+          setAnalysis(null);
+          setAnalysisStatus("idle");
+          setAnalysisError("");
+        }}
+        onRemove={(frameId) => {
+          removeFrame(frameId);
+          setAnalysis(null);
+          setAnalysisStatus("idle");
+          setAnalysisError("");
+        }}
+      />
 
       {analysis ? (
         <div className="space-y-8">

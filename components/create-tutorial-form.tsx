@@ -526,6 +526,7 @@ export function CreateTutorialForm() {
           />
           <TutorialPreview
             analysis={analysisResult.analysis}
+            taskDescription={description}
             sourceVideo={sourceVideo}
             sourceVideoUrl={previewUrl}
             onChangeAnalysis={(nextAnalysis) =>

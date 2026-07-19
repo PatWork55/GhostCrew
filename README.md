@@ -2,7 +2,7 @@
 
 Film once. Teach clearly.
 
-GhostCrew turns one rough phone recording of a simple physical task into a clearer tutorial plan. The MVP focuses on short, non-dangerous tasks and uses browser-side video preprocessing plus server-side multimodal instructional analysis.
+GhostCrew turns one rough phone recording of a simple physical task into a clearer tutorial plan. The MVP focuses on short, non-dangerous tasks and uses browser-side video preprocessing, server-side multimodal instructional analysis, and one explicit fal-powered supplementary image workflow.
 
 ## Problem
 
@@ -19,7 +19,7 @@ GhostCrew analyzes a short source clip, extracts representative frames, detects 
 - annotate a confusing orientation
 - reserve generated inserts for genuinely missing visual context
 
-The current milestone delivers a validated storyboard plus a real browser-based enhanced tutorial preview driven by the original uploaded video. It does not render or export a final MP4 yet.
+The current milestone delivers a validated storyboard, a real browser-based enhanced tutorial preview driven by the original uploaded video, and one explicitly triggered generated supplementary still image. It does not render or export a final MP4 yet.
 
 ## Target Users
 
@@ -43,6 +43,7 @@ The current milestone delivers a validated storyboard plus a real browser-based 
 - deterministic render-plan generation
 - browser-based enhanced tutorial playback with timeline controls
 - crop, slow-motion, freeze-frame, annotation, and generated-insert fallback preview
+- explicit fal-powered supplementary still generation with accept/reject review
 
 ## Architecture
 
@@ -65,6 +66,11 @@ flowchart TD
   K --> L[Storyboard response]
   L --> M[Editable storyboard]
   M --> N[Serializable render plan]
+  M --> Q[POST /api/generate-insert]
+  Q --> R[fal image-edit provider]
+  R --> S[Review generated result]
+  S -->|Accept| N
+  S -->|Reject or fail| T[Keep deterministic fallback]
   N --> O[Single-video playback engine]
   O --> P[Enhanced tutorial preview and timeline]
 ```
@@ -107,6 +113,27 @@ Flow:
 6. Post-process the storyboard deterministically to enforce chronology, evidence integrity, and safer treatment choices.
 7. Fall back to the demo provider when configured and necessary.
 
+## Generated Insert Architecture
+
+Relevant modules:
+
+- `lib/generation/generated-insert-schema.ts`
+- `lib/generation/generated-insert-provider.ts`
+- `lib/generation/fal-generated-insert-provider.ts`
+- `lib/generation/generated-insert-prompts.ts`
+- `lib/generation/generate-insert.ts`
+- `app/api/generate-insert/route.ts`
+
+Flow:
+
+1. The user changes a step to `generated_insert` or accepts an existing recommendation.
+2. GhostCrew keeps the deterministic fallback active until the user explicitly confirms a paid generation request.
+3. The client sends one validated evidence frame, concise user intent, step context, and quota counters to `POST /api/generate-insert`.
+4. The server screens the task for unsafe categories, validates the frame payload, and builds a constrained edit prompt.
+5. fal edits the reference image into a clearer supplementary still image.
+6. The user reviews the result and must explicitly accept it before the render plan switches from fallback playback to the generated media.
+7. Rejected, failed, or unloaded generated media immediately revert to the deterministic fallback.
+
 ## Rendering Architecture
 
 Relevant modules:
@@ -126,9 +153,12 @@ Flow:
 3. Drive the enhanced tutorial with one source `video` element when possible.
 4. Use CSS transforms for deterministic crops, playback-rate changes for slow motion, and canvas capture only for freeze-frame fallbacks.
 5. Overlay subtitles and normalized annotations on top of the active segment.
-6. Keep generated inserts as planned-but-pending steps with a deterministic fallback treatment so the full tutorial remains playable.
+6. Extend the render plan with generated-insert status, accepted media references, prompt summary, and warnings.
+7. Keep the deterministic fallback active until a generated result is explicitly accepted.
 
-## fal Model Selection
+## fal Models Used
+
+### Analysis
 
 Selected endpoint:
 
@@ -150,7 +180,37 @@ Official documentation references:
 - https://fal.ai/models/openrouter/router/vision/api
 - https://fal.ai/docs/model-api-reference/vision-api/openrouter-router
 
+### Generated Supplementary Insert
+
+Selected endpoint and model:
+
+- `fal-ai/nano-banana-2/edit`
+
+Why this was selected:
+
+- The official fal edit endpoint accepts one or more `image_urls`, including base64 Data URIs, which fits GhostCrew's selected evidence-frame workflow.
+- The model is documented as Google's newer semantic image-editing model and is optimized for preserving context while changing only what the prompt asks for.
+- The official page documents a fixed per-image price at 1K resolution, which makes cost guardrails practical for a hackathon MVP.
+- The result is a hosted image URL, which is enough to power a review step and a browser preview without adding cloud storage.
+
+Official documentation references:
+
+- https://fal.ai/models/fal-ai/nano-banana-2/edit/api
+- https://fal.ai/models/fal-ai/nano-banana-2/edit
+
+Optional animation model researched but not integrated in this milestone:
+
+- `fal-ai/kling-video/o3/standard/image-to-video`
+
+Why it was not integrated yet:
+
+- the official docs and model pages are broader and more operationally expensive than the still-image path
+- even the standard tier is priced per second, materially increasing hackathon credit burn
+- the accepted-image workflow already satisfies the milestone stop condition while keeping the preview reliable
+
 ## Official Parameters Used
+
+### Analysis
 
 GhostCrew currently sends the following documented input fields to fal:
 
@@ -168,6 +228,27 @@ Notes:
 - Multiple images are supported by the official endpoint.
 - The endpoint returns `output` as a string plus `usage`, so GhostCrew performs safe JSON parsing and validation server-side.
 - Native schema-constrained JSON output is not guaranteed by this endpoint, so GhostCrew uses strict prompting plus one controlled repair pass.
+
+### Generated Supplementary Insert
+
+GhostCrew currently sends the following documented input fields to `fal-ai/nano-banana-2/edit`:
+
+- `prompt`
+- `system_prompt`
+- `image_urls`
+- `num_images`
+- `aspect_ratio`
+- `output_format`
+- `resolution`
+- `safety_tolerance`
+- `limit_generations`
+
+Notes:
+
+- `image_urls` currently contains one selected evidence-frame Data URI from the original source video.
+- The official docs explicitly state that base64 Data URIs are accepted for file inputs.
+- GhostCrew uses `1K` resolution and `png` output for predictable pricing and reliable browser playback.
+- The UI exposes only still-image generation in this milestone, even though the request contract is shaped to accommodate future animation output.
 
 ## AI Workflow
 
@@ -221,7 +302,21 @@ Notes:
       "annotations": [],
       "generatedInsertPending": false,
       "generatedInsertPrompt": null,
-      "generatedInsertFallbackTreatment": null
+      "generatedInsertFallbackTreatment": null,
+      "generatedInsert": {
+        "status": "fallback_active",
+        "intent": "Create a clearer hinge close-up.",
+        "sourceFrameId": "frame-2",
+        "mediaType": null,
+        "mediaUrl": null,
+        "thumbnailUrl": null,
+        "durationSeconds": null,
+        "provider": null,
+        "model": null,
+        "warnings": [],
+        "generationPromptSummary": null,
+        "attemptCount": 0
+      }
     }
   ]
 }
@@ -296,10 +391,69 @@ Coordinate rules:
   "model": "google/gemini-2.5-flash",
   "fallbackUsed": false,
   "warnings": [],
+  "providerUsage": {
+    "costUsd": 0.002,
+    "totalTokens": 2679
+  },
   "usage": {
     "selectedFrameCount": 5,
     "aggregateImageBytes": 160000,
     "latencyMs": 1420
+  }
+}
+```
+
+## Generated Insert Request Contract
+
+`POST /api/generate-insert`
+
+```json
+{
+  "stepId": "step-2",
+  "taskTitle": "Assemble a phone stand",
+  "taskDescription": "Optional task context",
+  "sourceVideoDurationSeconds": 24.2,
+  "stepTitle": "Open the support arm",
+  "instruction": "Lift the support arm into place.",
+  "viewerRisk": "The hinge orientation is difficult to see.",
+  "evidenceFrameIds": ["frame-2", "frame-3"],
+  "intent": "Create a clearer close-up of the hinge orientation.",
+  "modelSuggestedPrompt": "Create a clear explanatory hinge close-up.",
+  "sourceFrame": {
+    "id": "frame-2",
+    "timestampSeconds": 4.5,
+    "imageDataUrl": "data:image/webp;base64,...",
+    "mimeType": "image/webp",
+    "width": 640,
+    "height": 360,
+    "byteSize": 180000
+  },
+  "outputType": "image",
+  "aspectRatio": "16:9",
+  "tutorialGenerationCount": 0,
+  "acceptedInsertCount": 0
+}
+```
+
+## Generated Insert Response Contract
+
+```json
+{
+  "stepId": "step-2",
+  "provider": "fal",
+  "imageModel": "fal-ai/nano-banana-2/edit",
+  "videoModel": null,
+  "resultType": "image",
+  "mediaUrl": "https://v3b.fal.media/files/.../generated.png",
+  "thumbnailUrl": "https://v3b.fal.media/files/.../generated.png",
+  "durationSeconds": 3,
+  "width": 1280,
+  "height": 720,
+  "generationPromptSummary": "Create a clearer close-up of the hinge orientation.",
+  "warnings": [],
+  "usage": {
+    "latencyMs": 10996,
+    "estimatedCostUsd": 0.08
   }
 }
 ```
@@ -324,23 +478,24 @@ Coordinate rules:
 - One source `video` element is reused across sequential segments whenever possible.
 - Segment transitions are controlled by source start and end timestamps plus per-segment playback rate.
 - Freeze-frame segments pause source playback and hold a still image for a configurable duration.
+- Accepted generated supplementary images hold for `2` to `4` seconds and remain muted, labeled, and subtitle-compatible.
 - Current output time, active segment, and total duration are derived from the render plan rather than from raw source playback alone.
 - The tutorial timeline supports segment preview, full-sequence play, pause, restart, and jump-to-step.
 
 ## Generated Insert Fallback
 
-GhostCrew does not call fal media-generation models in this milestone.
-
 When a step requests `generated_insert`:
 
-- the render plan marks the insert as pending
-- the UI shows a non-blocking pending badge
-- GhostCrew chooses a deterministic fallback treatment:
-  - `freeze_frame` when the main issue is orientation ambiguity
-  - `crop_close_up` when the relevant detail already exists in the source footage
-  - `annotation` when a label or highlight is enough
+- GhostCrew immediately keeps a deterministic fallback active
+- the user must explicitly confirm the paid generation request
+- the generated result is reviewed before it can enter playback
+- if the user rejects the result, generation fails, or the generated media URL fails to load, GhostCrew restores the fallback without breaking the timeline
 
-This keeps the tutorial fully playable even before generative inserts exist.
+Fallback choice order:
+
+- `freeze_frame` when the main issue is orientation ambiguity
+- `crop_close_up` when the needed detail already exists in the source footage
+- `annotation` when a label or highlight is enough
 
 ## Validation And Safety Limits
 
@@ -374,7 +529,18 @@ Render constraints:
 - slow motion supports `0.5x` and `0.75x`
 - freeze-frame duration is currently clamped between `1.5` and `3` seconds
 - crop coordinates are normalized and clamped to source bounds
-- generated inserts remain deterministic fallbacks until media generation is added
+- accepted generated supplementary stills display for `2` to `4` seconds
+- generated media never replaces the original footage as factual source-of-truth
+
+Generated-insert constraints:
+
+- one accepted generated insert per tutorial by default
+- up to two accepted inserts only through explicit `NEXT_PUBLIC_GENERATED_INSERT_MAX_PER_TUTORIAL=2` configuration
+- at most two generation requests per tutorial session
+- only one evidence frame is sent for the current supplementary-image workflow
+- max reference-frame payload: `2 MB`
+- generation intent is limited to `180` characters
+- UI currently exposes still-image generation only
 
 Unsafe task categories rejected or flagged:
 
@@ -392,8 +558,10 @@ Environment strategy:
 
 - `FAL_KEY` is server-only and must never be exposed to the browser.
 - `FAL_VISION_ENDPOINT_ID` and `FAL_VISION_MODEL` are server-side configuration.
+- `FAL_IMAGE_EDIT_ENDPOINT_ID` and `FAL_IMAGE_EDIT_MODEL` are server-side configuration.
 - `DEMO_FALLBACK_ENABLED` controls server fallback behavior.
 - `NEXT_PUBLIC_DEMO_MODE` is UI-safe and only indicates whether demo mode is available in the product experience.
+- `NEXT_PUBLIC_GENERATED_INSERT_MAX_PER_TUTORIAL` is a safe public UI limit and supports `1` or `2`.
 
 Runtime behavior:
 
@@ -401,24 +569,27 @@ Runtime behavior:
 - `FAL_KEY` absent and fallback enabled: use demo analysis.
 - real provider fails and fallback enabled: use demo analysis and return a warning.
 - real provider fails and fallback disabled: return a controlled provider error.
+- generated-insert provider succeeds: return a reviewable fal image result and keep fallback active until user acceptance.
+- generated-insert provider fails: return a controlled error and keep the deterministic fallback active in the UI.
 
 ## Approximate Cost
 
-The selected fal endpoint is documented as token-usage based. The official docs indicate the `model` is charged based on actual token usage and the output includes a `usage.cost` field.
+Analysis:
 
-That means cost depends on:
+- `openrouter/router/vision` with `google/gemini-2.5-flash` is token-usage based.
+- On Sunday, July 19, 2026, one controlled real analysis smoke call reported `providerUsage.costUsd: 0.0020094`.
+- A second live analysis during the generation smoke reported `providerUsage.costUsd: 0.0020225`.
 
-- selected underlying model
-- prompt size
-- number and size of submitted frames
-- response length
+Generated supplementary image:
 
-GhostCrew currently minimizes cost by:
+- The official `fal-ai/nano-banana-2/edit` model page states `$0.08` per `1K` image.
+- GhostCrew currently requests one `1K` PNG image per generation call.
+- On Sunday, July 19, 2026, the live generation smoke used two paid image-edit calls, for an estimated `$0.16`.
 
-- capping the selected frame count
-- resizing frames client-side
-- using short, structured prompts
-- avoiding repeated provider retries
+Observed paid spend during the successful live smokes executed on Sunday, July 19, 2026:
+
+- approximately `$0.164`
+- calculation: two successful analysis calls (`~$0.00403` total) plus two successful `nano-banana-2/edit` image calls (`$0.16` total)
 
 ## Local Development
 
@@ -453,9 +624,12 @@ Copy `.env.example` to `.env.local`.
 FAL_KEY=
 FAL_VISION_ENDPOINT_ID=openrouter/router/vision
 FAL_VISION_MODEL=google/gemini-2.5-flash
+FAL_IMAGE_EDIT_ENDPOINT_ID=fal-ai/nano-banana-2/edit
+FAL_IMAGE_EDIT_MODEL=fal-ai/nano-banana-2/edit
 DEMO_FALLBACK_ENABLED=true
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 NEXT_PUBLIC_DEMO_MODE=true
+NEXT_PUBLIC_GENERATED_INSERT_MAX_PER_TUTORIAL=1
 ```
 
 ## Demo Instructions
@@ -469,7 +643,8 @@ NEXT_PUBLIC_DEMO_MODE=true
 7. Review the storyboard, warnings, confidence, and evidence thumbnails.
 8. Edit titles, instructions, or treatment recommendations as needed.
 9. Compare the original clip against the enhanced preview.
-10. Adjust crop presets, slow-motion rate, freeze-frame duration, and annotation labels in the enhanced player.
+10. For a `generated_insert` step, choose an evidence frame, confirm the paid generation call, review the result, and accept or reject it.
+11. Adjust crop presets, slow-motion rate, freeze-frame duration, and annotation labels in the enhanced player.
 
 ## Known Limitations
 
@@ -481,7 +656,9 @@ NEXT_PUBLIC_DEMO_MODE=true
 - Because the model sees only representative frames, it can miss micro-actions that happen between sampled timestamps.
 - `crop_close_up` currently uses deterministic CSS transforms rather than tracked object detection.
 - `slow_motion` currently uses playback-rate slowdown and not AI frame interpolation.
-- `generated_insert` is previewed through fallback treatments only.
+- Generated supplementary insert generation currently targets still images, not animated clips.
+- A generated result must be accepted manually before it enters playback.
+- Optional video animation was researched but intentionally deferred to keep cost and runtime risk under control.
 
 ## Why FFmpeg Is Not Used Yet
 

@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { RENDERING_LIMITS } from "@/lib/constants";
+import {
+  generatedInsertRenderStateSchema
+} from "@/lib/generation/generated-insert-schema";
 import { treatmentSchema } from "@/lib/tutorial-schema";
 
 const normalizedCoordinateSchema = z.number().min(0).max(1);
@@ -120,7 +123,8 @@ export const renderPlanSegmentSchema = z
     annotations: z.array(annotationSchema),
     generatedInsertPending: z.boolean(),
     generatedInsertPrompt: z.string().nullable(),
-    generatedInsertFallbackTreatment: renderableTreatmentSchema.nullable()
+    generatedInsertFallbackTreatment: renderableTreatmentSchema.nullable(),
+    generatedInsert: generatedInsertRenderStateSchema.optional()
   })
   .superRefine((segment, context) => {
     if (segment.sourceEndTime <= segment.sourceStartTime) {
@@ -251,7 +255,8 @@ export const renderStepOverrideSchema = z.object({
   freezeFrameTimestamp: z.number().min(0).optional(),
   freezeFrameDurationSeconds: z.number().positive().optional(),
   freezeFrameSourceFrameId: z.string().nullable().optional(),
-  annotations: z.array(annotationSchema).optional()
+  annotations: z.array(annotationSchema).optional(),
+  generatedInsert: generatedInsertRenderStateSchema.optional()
 });
 
 export const renderPlanOverridesSchema = z.record(z.string().min(1), renderStepOverrideSchema);

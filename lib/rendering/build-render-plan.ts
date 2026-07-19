@@ -1,6 +1,10 @@
 import { sourceVideoMetadataSchema, type SourceVideoFrame } from "@/lib/source-video";
 import { tutorialAnalysisSchema, type TutorialAnalysis } from "@/lib/tutorial-schema";
 import {
+  buildDefaultGeneratedInsertState,
+  generatedInsertRenderStateSchema
+} from "@/lib/generation/generated-insert-schema";
+import {
   renderPlanOverridesSchema,
   renderPlanSchema,
   type RenderPlan,
@@ -8,6 +12,7 @@ import {
 } from "@/lib/rendering/render-plan";
 import {
   clampTimestamp,
+  buildDefaultGeneratedInsertIntent,
   buildDefaultAnnotations,
   getDefaultCropForPreset,
   getOutputDurationSeconds,
@@ -32,6 +37,29 @@ function roundToPrecision(value: number, precision = 3) {
   const factor = 10 ** precision;
 
   return Math.round(value * factor) / factor;
+}
+
+function selectDefaultGeneratedInsertSourceFrameId(
+  evidenceFrameIds: string[],
+  sourceFrames: Array<Pick<SourceVideoFrame, "id">>
+) {
+  return (
+    evidenceFrameIds.find((frameId) => sourceFrames.some((frame) => frame.id === frameId)) ??
+    evidenceFrameIds[0] ??
+    null
+  );
+}
+
+function clampGeneratedInsertDuration(durationSeconds: number | null) {
+  return roundToPrecision(
+    Math.min(
+      RENDERING_LIMITS.maximumFreezeFrameDurationSeconds + 1,
+      Math.max(
+        RENDERING_LIMITS.minimumFreezeFrameDurationSeconds + 0.5,
+        durationSeconds ?? 3
+      )
+    )
+  );
 }
 
 export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
@@ -63,6 +91,36 @@ export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
     const sourceDurationSeconds = roundToPrecision(sourceEndTime - sourceStartTime);
     previousSourceEndTime = sourceEndTime;
     const treatmentResolution = resolveRenderableTreatment(step);
+    const generatedInsert =
+      step.treatment === "generated_insert"
+        ? generatedInsertRenderStateSchema.parse(
+            stepOverride?.generatedInsert ??
+              buildDefaultGeneratedInsertState(
+                buildDefaultGeneratedInsertIntent(step),
+                selectDefaultGeneratedInsertSourceFrameId(
+                  step.evidenceFrameIds,
+                  input.sourceFrames
+                )
+              )
+          )
+        : generatedInsertRenderStateSchema.parse({
+            status: "not_requested",
+            intent: "",
+            sourceFrameId: null,
+            mediaType: null,
+            mediaUrl: null,
+            thumbnailUrl: null,
+            durationSeconds: null,
+            provider: null,
+            model: null,
+            warnings: [],
+            generationPromptSummary: null,
+            attemptCount: 0
+          });
+    const hasAcceptedGeneratedImage =
+      generatedInsert.status === "completed" &&
+      generatedInsert.mediaType === "image" &&
+      Boolean(generatedInsert.mediaUrl);
     const playbackRate =
       treatmentResolution.treatment === "slow_motion"
         ? normalizePlaybackRate(stepOverride?.playbackRate)
@@ -84,12 +142,14 @@ export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
       treatmentResolution.treatment === "freeze_frame"
         ? normalizeFreezeFrameDuration(stepOverride?.freezeFrameDurationSeconds)
         : null;
-    const outputDurationSeconds = getOutputDurationSeconds(
-      sourceDurationSeconds,
-      treatmentResolution.treatment,
-      playbackRate,
-      freezeFrameDurationSeconds
-    );
+    const outputDurationSeconds = hasAcceptedGeneratedImage
+      ? clampGeneratedInsertDuration(generatedInsert.durationSeconds)
+      : getOutputDurationSeconds(
+          sourceDurationSeconds,
+          treatmentResolution.treatment,
+          playbackRate,
+          freezeFrameDurationSeconds
+        );
     const defaultCropPreset = stepOverride?.cropPreset ?? "center";
     const crop =
       treatmentResolution.treatment === "crop_close_up"
@@ -136,12 +196,18 @@ export function buildRenderPlan(input: BuildRenderPlanInput): RenderPlan {
       freezeFrameDurationSeconds,
       freezeFrameSourceFrameId,
       annotations,
-      generatedInsertPending: treatmentResolution.generatedInsertPending,
+      generatedInsertPending:
+        step.treatment === "generated_insert" &&
+        !["completed", "rejected_by_user", "failed", "not_requested"].includes(
+          generatedInsert.status
+        ),
       generatedInsertPrompt:
-        treatmentResolution.generatedInsertPending && step.generationPrompt
-          ? step.generationPrompt.trim()
+        step.treatment === "generated_insert" ? generatedInsert.intent.trim() : null,
+      generatedInsertFallbackTreatment:
+        step.treatment === "generated_insert"
+          ? treatmentResolution.generatedInsertFallbackTreatment
           : null,
-      generatedInsertFallbackTreatment: treatmentResolution.generatedInsertFallbackTreatment
+      generatedInsert
     };
   });
 

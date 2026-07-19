@@ -32,6 +32,24 @@ export const ANALYSIS_LIMITS = {
   maximumOverlapSeconds: 0.35
 } as const;
 
+const configuredGeneratedInsertLimit =
+  process.env.NEXT_PUBLIC_GENERATED_INSERT_MAX_PER_TUTORIAL === "2" ? 2 : 1;
+
+export const GENERATED_INSERT_LIMITS = {
+  maxAcceptedInsertsPerTutorial: configuredGeneratedInsertLimit,
+  maxGenerationRequestsPerTutorial: 2,
+  maxIntentLength: 180,
+  maxPromptSummaryLength: 180,
+  maxReferenceFrameBytes: 2 * 1024 * 1024,
+  imageResolution: "1K" as const,
+  imageOutputFormat: "png" as const,
+  imageAspectRatios: ["16:9", "9:16", "1:1"] as const,
+  defaultImageDisplayDurationSeconds: 3,
+  minimumImageDisplayDurationSeconds: 2,
+  maximumImageDisplayDurationSeconds: 4,
+  requestTimeoutMs: 60_000
+} as const;
+
 export const RENDERING_LIMITS = {
   minimumSegmentDurationSeconds: 0.25,
   defaultSlowMotionPlaybackRate: 0.5,

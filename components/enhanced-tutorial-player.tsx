@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { captureSourceVideoFrameAtTimestamp } from "@/lib/browser-video-processing";
+import { GeneratedInsertPanel } from "@/components/generated-insert-panel";
 import { formatDuration } from "@/lib/format";
+import type { GeneratedInsertResult } from "@/lib/generation/generated-insert-schema";
+import { shouldUseAcceptedGeneratedImage } from "@/lib/generation/generated-insert-state";
 import type { SourceVideo } from "@/lib/source-video";
 import type {
   AnnotationType,
@@ -24,12 +27,26 @@ type EnhancedTutorialPlayerProps = {
   renderPlan: RenderPlan;
   sourceVideoUrl: string;
   sourceVideo: SourceVideo;
+  generatedInsertReviews: Record<string, GeneratedInsertResult>;
+  sessionGenerationCount: number;
+  acceptedInsertCount: number;
+  maxAcceptedInsertsPerTutorial: number;
   onChangeTreatment: (stepId: string, treatment: Treatment) => void;
   onUpdateStepOverride: (
     stepId: string,
     updater: (current: RenderStepOverride) => RenderStepOverride
   ) => void;
   onResetStepOverride: (stepId: string) => void;
+  onUpdateGeneratedInsertIntent: (stepId: string, intent: string) => void;
+  onUpdateGeneratedInsertSourceFrame: (stepId: string, sourceFrameId: string) => void;
+  onRequestGeneratedInsert: (stepId: string) => void;
+  onConfirmGeneratedInsert: (stepId: string) => void;
+  onCancelGeneratedInsertConfirmation: (stepId: string) => void;
+  onAcceptGeneratedInsert: (stepId: string) => void;
+  onRejectGeneratedInsert: (stepId: string) => void;
+  onKeepGeneratedInsertFallback: (stepId: string) => void;
+  onRegenerateGeneratedInsert: (stepId: string) => void;
+  onGeneratedInsertPlaybackFailure: (stepId: string, warning: string) => void;
 };
 
 function formatPlaybackRate(playbackRate: number) {
@@ -62,9 +79,23 @@ export function EnhancedTutorialPlayer({
   renderPlan,
   sourceVideoUrl,
   sourceVideo,
+  generatedInsertReviews,
+  sessionGenerationCount,
+  acceptedInsertCount,
+  maxAcceptedInsertsPerTutorial,
   onChangeTreatment,
   onUpdateStepOverride,
-  onResetStepOverride
+  onResetStepOverride,
+  onUpdateGeneratedInsertIntent,
+  onUpdateGeneratedInsertSourceFrame,
+  onRequestGeneratedInsert,
+  onConfirmGeneratedInsert,
+  onCancelGeneratedInsertConfirmation,
+  onAcceptGeneratedInsert,
+  onRejectGeneratedInsert,
+  onKeepGeneratedInsertFallback,
+  onRegenerateGeneratedInsert,
+  onGeneratedInsertPlaybackFailure
 }: EnhancedTutorialPlayerProps) {
   const {
     activeSegment: playbackActiveSegment,
@@ -83,6 +114,9 @@ export function EnhancedTutorialPlayer({
   const [selectedSegmentId, setSelectedSegmentId] = useState(renderPlan.segments[0]?.id ?? "");
   const [annotationDraftType, setAnnotationDraftType] = useState<AnnotationType>("label");
   const [freezeFrameImageCache, setFreezeFrameImageCache] = useState<Record<string, string>>({});
+  const [generatedImageLoadFailures, setGeneratedImageLoadFailures] = useState<
+    Record<string, true>
+  >({});
   const [freezeFrameError, setFreezeFrameError] = useState("");
 
   const selectedSegment =
@@ -106,6 +140,7 @@ export function EnhancedTutorialPlayer({
   useEffect(() => {
     setFreezeFrameImageCache({});
     setFreezeFrameError("");
+    setGeneratedImageLoadFailures({});
   }, [sourceVideoUrl]);
 
   const freezeFrameImage = useMemo(() => {
@@ -325,6 +360,13 @@ export function EnhancedTutorialPlayer({
 
   const segmentAnnotations = selectedSegment?.annotations ?? [];
   const cropStyle = getVisibleVideoStyle(activeSegment);
+  const activeGeneratedImageUrl =
+    activeSegment && shouldUseAcceptedGeneratedImage(
+      activeSegment.generatedInsert,
+      Boolean(generatedImageLoadFailures[activeSegment.id])
+    )
+      ? activeSegment.generatedInsert?.mediaUrl
+      : null;
 
   return (
     <section className="space-y-6">
@@ -343,11 +385,22 @@ export function EnhancedTutorialPlayer({
               {activeSegment ? (
                 <StatusPill
                   label={
-                    activeSegment.generatedInsertPending
-                      ? "generated insert pending"
-                      : treatmentLabel[activeSegment.treatment]
+                    activeGeneratedImageUrl
+                      ? "AI-generated supplementary view"
+                      : activeSegment.generatedInsert?.status === "failed"
+                        ? "generated fallback active"
+                        : activeSegment.generatedInsertPending
+                          ? "generated insert pending"
+                          : treatmentLabel[activeSegment.treatment]
                   }
-                  tone={activeSegment.generatedInsertPending ? "warning" : "success"}
+                  tone={
+                    activeGeneratedImageUrl
+                      ? "success"
+                      : activeSegment.generatedInsertPending ||
+                          activeSegment.generatedInsert?.status === "failed"
+                        ? "warning"
+                        : "success"
+                  }
                 />
               ) : null}
             </div>
@@ -383,10 +436,30 @@ export function EnhancedTutorialPlayer({
                   preload="metadata"
                   playsInline
                   className={`absolute inset-0 bg-black object-cover ${
-                    displayMode === "freeze" ? "opacity-0" : "opacity-100"
+                    displayMode === "freeze" || displayMode === "generated_image"
+                      ? "opacity-0"
+                      : "opacity-100"
                   }`}
                   style={cropStyle}
                 />
+                {displayMode === "generated_image" && activeSegment && activeGeneratedImageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={activeGeneratedImageUrl}
+                    alt={`${activeSegment.title} generated supplementary view`}
+                    className="absolute inset-0 h-full w-full object-cover"
+                    onError={() => {
+                      setGeneratedImageLoadFailures((current) => ({
+                        ...current,
+                        [activeSegment.id]: true
+                      }));
+                      onGeneratedInsertPlaybackFailure(
+                        activeSegment.stepId,
+                        "The generated supplementary view could not be loaded, so GhostCrew restored the deterministic fallback."
+                      );
+                    }}
+                  />
+                ) : null}
                 {displayMode === "freeze" && activeSegment ? (
                   freezeFrameImage ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -415,11 +488,18 @@ export function EnhancedTutorialPlayer({
                         Step {activeSegment.stepNumber}
                       </span>
                       <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/65">
-                        {treatmentLabel[activeSegment.treatment]}
+                        {activeGeneratedImageUrl
+                          ? "AI-generated supplementary view"
+                          : treatmentLabel[activeSegment.treatment]}
                       </span>
                       {activeSegment.generatedInsertPending ? (
                         <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-3 py-1 text-xs text-amber-100">
                           Generated insert pending
+                        </span>
+                      ) : null}
+                      {activeGeneratedImageUrl ? (
+                        <span className="rounded-full border border-cyan-400/25 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100">
+                          Supplementary only
                         </span>
                       ) : null}
                     </div>
@@ -483,7 +563,11 @@ export function EnhancedTutorialPlayer({
               <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
                 <p className="text-xs uppercase tracking-[0.22em] text-white/40">Playback mode</p>
                 <p className="mt-2 text-sm text-white/78">
-                  {displayMode === "freeze" ? "Freeze frame" : "Source video"}
+                  {displayMode === "freeze"
+                    ? "Freeze frame"
+                    : displayMode === "generated_image"
+                      ? "Generated image"
+                      : "Source video"}
                 </p>
               </div>
             </div>
@@ -522,9 +606,37 @@ export function EnhancedTutorialPlayer({
                 {selectedSegment.generatedInsertPending ? (
                   <div className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
                     Generated insert is planned for this step. GhostCrew is previewing the fallback treatment{" "}
-                    <strong>{treatmentLabel[selectedSegment.treatment]}</strong> until generative media
-                    is implemented.
+                    <strong>{treatmentLabel[selectedSegment.treatment]}</strong> until you accept an
+                    AI-generated supplementary view.
                   </div>
+                ) : null}
+
+                {selectedSegment.requestedTreatment === "generated_insert" ? (
+                  <GeneratedInsertPanel
+                    segment={selectedSegment}
+                    evidenceFramesById={sourceFrameById}
+                    reviewResult={generatedInsertReviews[selectedSegment.stepId] ?? null}
+                    sessionGenerationCount={sessionGenerationCount}
+                    acceptedInsertCount={acceptedInsertCount}
+                    maxAcceptedInsertsPerTutorial={maxAcceptedInsertsPerTutorial}
+                    onChangeIntent={(intent) =>
+                      onUpdateGeneratedInsertIntent(selectedSegment.stepId, intent)
+                    }
+                    onChangeSourceFrameId={(frameId) =>
+                      onUpdateGeneratedInsertSourceFrame(selectedSegment.stepId, frameId)
+                    }
+                    onRequestGenerate={() => onRequestGeneratedInsert(selectedSegment.stepId)}
+                    onConfirmGenerate={() => onConfirmGeneratedInsert(selectedSegment.stepId)}
+                    onCancelConfirmation={() =>
+                      onCancelGeneratedInsertConfirmation(selectedSegment.stepId)
+                    }
+                    onAcceptReview={() => onAcceptGeneratedInsert(selectedSegment.stepId)}
+                    onRejectReview={() => onRejectGeneratedInsert(selectedSegment.stepId)}
+                    onKeepFallback={() =>
+                      onKeepGeneratedInsertFallback(selectedSegment.stepId)
+                    }
+                    onRegenerate={() => onRegenerateGeneratedInsert(selectedSegment.stepId)}
+                  />
                 ) : null}
 
                 {selectedSegment.treatment === "crop_close_up" ? (

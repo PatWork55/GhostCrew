@@ -50,6 +50,17 @@ export function TutorialTimeline({
         {renderPlan.segments.map((segment) => {
           const isActive = segment.id === activeSegmentId;
           const isSelected = segment.id === selectedSegmentId;
+          const generatedInsertStatus = segment.generatedInsert?.status;
+          const generatedInsertBadge =
+            generatedInsertStatus === "completed"
+              ? "AI view accepted"
+              : generatedInsertStatus === "failed"
+                ? "Fallback after failure"
+                : generatedInsertStatus === "rejected_by_user"
+                  ? "Fallback after rejection"
+                  : segment.generatedInsertPending
+                    ? "Generated insert pending"
+                    : null;
 
           return (
             <article
@@ -75,9 +86,18 @@ export function TutorialTimeline({
                     <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/65">
                       {treatmentLabel[segment.requestedTreatment]}
                     </span>
-                    {segment.generatedInsertPending ? (
-                      <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-3 py-1 text-xs text-amber-100">
-                        Generated insert pending
+                    {generatedInsertBadge ? (
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs ${
+                          generatedInsertStatus === "completed"
+                            ? "border-cyan-400/25 bg-cyan-400/10 text-cyan-100"
+                            : generatedInsertStatus === "failed" ||
+                                generatedInsertStatus === "rejected_by_user"
+                              ? "border-amber-400/25 bg-amber-400/10 text-amber-100"
+                              : "border-amber-400/25 bg-amber-400/10 text-amber-100"
+                        }`}
+                      >
+                        {generatedInsertBadge}
                       </span>
                     ) : null}
                     {isActive ? (

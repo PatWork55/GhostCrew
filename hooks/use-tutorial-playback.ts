@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RenderPlan } from "@/lib/rendering/render-plan";
 
-type DisplayMode = "video" | "freeze";
+type DisplayMode = "video" | "freeze" | "generated_image";
 
 type JumpOptions = {
   autoplay?: boolean;
@@ -11,6 +11,14 @@ type JumpOptions = {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function usesAcceptedGeneratedImage(segment: RenderPlan["segments"][number] | null | undefined) {
+  return Boolean(
+    segment?.generatedInsert?.status === "completed" &&
+      segment.generatedInsert.mediaType === "image" &&
+      segment.generatedInsert.mediaUrl
+  );
 }
 
 async function waitForVideoMetadata(video: HTMLVideoElement) {
@@ -116,7 +124,7 @@ export function useTutorialPlayback(renderPlan: RenderPlan, sourceVideoUrl: stri
       return;
     }
 
-    if (currentSegment.treatment === "freeze_frame") {
+    if (currentSegment.treatment === "freeze_frame" || usesAcceptedGeneratedImage(currentSegment)) {
       if (freezeStartedAtMs.current !== null) {
         freezeElapsedSeconds.current = clamp(
           (performance.now() - freezeStartedAtMs.current) / 1000,
@@ -152,6 +160,21 @@ export function useTutorialPlayback(renderPlan: RenderPlan, sourceVideoUrl: stri
       setCurrentOutputTime(nextSegment.outputStartTime);
       freezeElapsedSeconds.current = 0;
       freezeStartedAtMs.current = null;
+
+      if (usesAcceptedGeneratedImage(nextSegment)) {
+        setDisplayMode("generated_image");
+
+        if (options?.autoplay) {
+          isPlayingRef.current = true;
+          setIsPlaying(true);
+          freezeStartedAtMs.current = performance.now();
+        } else {
+          isPlayingRef.current = false;
+          setIsPlaying(false);
+        }
+
+        return;
+      }
 
       if (nextSegment.treatment === "freeze_frame") {
         setDisplayMode("freeze");
@@ -218,7 +241,7 @@ export function useTutorialPlayback(renderPlan: RenderPlan, sourceVideoUrl: stri
         return;
       }
 
-      if (currentSegment.treatment === "freeze_frame") {
+      if (currentSegment.treatment === "freeze_frame" || usesAcceptedGeneratedImage(currentSegment)) {
         const segmentStartMs =
           freezeStartedAtMs.current ?? performance.now() - freezeElapsedSeconds.current * 1000;
         const elapsedSeconds = clamp(
@@ -278,7 +301,7 @@ export function useTutorialPlayback(renderPlan: RenderPlan, sourceVideoUrl: stri
 
     setPlaybackError("");
 
-    if (currentSegment.treatment === "freeze_frame") {
+    if (currentSegment.treatment === "freeze_frame" || usesAcceptedGeneratedImage(currentSegment)) {
       freezeStartedAtMs.current =
         performance.now() - freezeElapsedSeconds.current * 1000;
       isPlayingRef.current = true;

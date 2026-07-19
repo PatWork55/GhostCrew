@@ -65,6 +65,7 @@ function finalizeSuccessfulAnalysis(
     model: providerResult.model,
     fallbackUsed,
     warnings: [...extraWarnings, ...providerResult.warnings, ...postProcessed.warnings],
+    providerUsage: providerResult.usage,
     usage: buildUsagePayload(request, startedAt, now)
   });
 }

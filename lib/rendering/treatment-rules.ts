@@ -1,4 +1,4 @@
-import { RENDERING_LIMITS } from "@/lib/constants";
+import { GENERATED_INSERT_LIMITS, RENDERING_LIMITS } from "@/lib/constants";
 import type { SourceVideoFrame } from "@/lib/source-video";
 import type { TutorialStep } from "@/lib/tutorial-schema";
 import type {
@@ -255,6 +255,18 @@ export function resolveGeneratedInsertFallback(step: TutorialStep): RenderableTr
   }
 
   return "annotation";
+}
+
+export function buildDefaultGeneratedInsertIntent(
+  step: Pick<TutorialStep, "title" | "viewerRisk" | "generationPrompt">
+) {
+  if (step.generationPrompt?.trim()) {
+    return step.generationPrompt.trim().slice(0, GENERATED_INSERT_LIMITS.maxIntentLength);
+  }
+
+  return `Create a clearer explanatory view for ${step.title.toLowerCase()} and make this easier to understand: ${step.viewerRisk}`
+    .slice(0, GENERATED_INSERT_LIMITS.maxIntentLength)
+    .trim();
 }
 
 export function resolveRenderableTreatment(step: TutorialStep): {

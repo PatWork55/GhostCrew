@@ -28,6 +28,14 @@ export const analysisResponseSchema = z.object({
   model: z.string().min(1),
   fallbackUsed: z.boolean(),
   warnings: z.array(z.string()),
+  providerUsage: z
+    .object({
+      costUsd: z.number().nonnegative().optional(),
+      inputTokens: z.number().int().nonnegative().optional(),
+      outputTokens: z.number().int().nonnegative().optional(),
+      totalTokens: z.number().int().nonnegative().optional()
+    })
+    .optional(),
   usage: z.object({
     selectedFrameCount: z.number().int().nonnegative(),
     aggregateImageBytes: z.number().int().nonnegative(),

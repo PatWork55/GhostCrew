@@ -131,6 +131,51 @@ test("buildRenderPlan falls back generated_insert to a playable treatment", () =
   assert.equal(renderPlan.segments[0]?.generatedInsertFallbackTreatment, "freeze_frame");
 });
 
+test("buildRenderPlan keeps backward compatibility and swaps to accepted generated media", () => {
+  const request = createAnalysisRequest();
+  const analysis = createTutorialAnalysis({
+    steps: [
+      {
+        ...createTutorialAnalysis().steps[1]!,
+        treatment: "generated_insert",
+        visibility: "partial",
+        generationPrompt: "Create a clearer hinge view."
+      },
+      ...createTutorialAnalysis().steps.filter((step) => step.id !== "step-2")
+    ]
+  });
+
+  const renderPlan = buildRenderPlan({
+    analysis,
+    sourceVideoMetadata: request.video,
+    sourceFrames: createSourceFrames(),
+    overrides: {
+      "step-2": {
+        generatedInsert: {
+          status: "completed",
+          intent: "Create a clearer hinge close-up.",
+          sourceFrameId: "frame-2",
+          mediaType: "image",
+          mediaUrl: "https://example.com/generated.png",
+          thumbnailUrl: "https://example.com/generated.png",
+          durationSeconds: 3,
+          provider: "fal",
+          model: "fal-ai/nano-banana-2/edit",
+          warnings: [],
+          generationPromptSummary: "Create a clearer hinge close-up.",
+          attemptCount: 1
+        }
+      }
+    }
+  });
+
+  const generatedSegment = renderPlan.segments.find((segment) => segment.stepId === "step-2");
+
+  assert.equal(generatedSegment?.generatedInsert?.status, "completed");
+  assert.equal(generatedSegment?.generatedInsertPending, false);
+  assert.equal(generatedSegment?.outputDurationSeconds, 3);
+});
+
 test("normalizeAnnotations clamps coordinates and timing to valid bounds", () => {
   const normalized = normalizeAnnotations(
     [
@@ -180,6 +225,44 @@ test("renderPlanSchema rejects invalid crop segments", () => {
           outputDurationSeconds: 4,
           playbackRate: 1,
           cropPreset: "custom",
+          crop: null,
+          freezeFrameTimestamp: null,
+          freezeFrameDurationSeconds: null,
+          freezeFrameSourceFrameId: null,
+          annotations: [],
+          generatedInsertPending: false,
+          generatedInsertPrompt: null,
+          generatedInsertFallbackTreatment: null
+        }
+      ]
+    })
+  );
+});
+
+test("renderPlanSchema remains backward-compatible with segments that omit generatedInsert", () => {
+  assert.doesNotThrow(() =>
+    renderPlanSchema.parse({
+      sourceDurationSeconds: 24,
+      durationSeconds: 4,
+      segments: [
+        {
+          id: "segment-step-1",
+          stepId: "step-1",
+          stepNumber: 1,
+          title: "Original",
+          subtitle: "Keep it",
+          confidence: 0.8,
+          evidenceFrameIds: ["frame-1"],
+          requestedTreatment: "keep_original",
+          treatment: "keep_original",
+          sourceStartTime: 0,
+          sourceEndTime: 4,
+          sourceDurationSeconds: 4,
+          outputStartTime: 0,
+          outputEndTime: 4,
+          outputDurationSeconds: 4,
+          playbackRate: 1,
+          cropPreset: "center",
           crop: null,
           freezeFrameTimestamp: null,
           freezeFrameDurationSeconds: null,

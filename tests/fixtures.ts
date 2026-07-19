@@ -1,4 +1,9 @@
 import type { AnalysisRequest, ValidatedAnalysisRequest } from "@/lib/analysis-contract";
+import type {
+  GeneratedInsertRequest,
+  GeneratedInsertResult,
+  ValidatedGeneratedInsertRequest
+} from "@/lib/generation/generated-insert-schema";
 import type { TutorialAnalysis } from "@/lib/tutorial-schema";
 
 export function createFrame(frameId: string, timestampSeconds: number, byteLength = 12) {
@@ -136,5 +141,64 @@ export function createSourceVideoFrame(frameId: string, timestampSeconds: number
   return {
     ...frame,
     isSelected: true
+  };
+}
+
+export function createGeneratedInsertRequest(
+  overrides: Partial<GeneratedInsertRequest> = {}
+): GeneratedInsertRequest {
+  return {
+    stepId: "step-2",
+    taskTitle: "Assemble a phone stand",
+    taskDescription: "Show the hinge and the final angle.",
+    sourceVideoDurationSeconds: 24.2,
+    stepTitle: "Open the support arm",
+    instruction: "Lift the support arm into place.",
+    viewerRisk: "The hinge orientation is difficult to see.",
+    evidenceFrameIds: ["frame-2", "frame-3"],
+    intent: "Create a clearer close-up of the hinge orientation.",
+    modelSuggestedPrompt: "Create a clear explanatory hinge close-up.",
+    sourceFrame: createFrame("frame-2", 4.5),
+    outputType: "image",
+    aspectRatio: "16:9",
+    tutorialGenerationCount: 0,
+    acceptedInsertCount: 0,
+    ...overrides
+  };
+}
+
+export function createValidatedGeneratedInsertRequest(
+  overrides: Partial<ValidatedGeneratedInsertRequest> = {}
+): ValidatedGeneratedInsertRequest {
+  const base = createGeneratedInsertRequest();
+
+  return {
+    ...base,
+    decodedReferenceBytes: base.sourceFrame.byteSize,
+    ...overrides
+  };
+}
+
+export function createGeneratedInsertResult(
+  overrides: Partial<GeneratedInsertResult> = {}
+): GeneratedInsertResult {
+  return {
+    stepId: "step-2",
+    provider: "fal",
+    imageModel: "fal-ai/nano-banana-2/edit",
+    videoModel: null,
+    resultType: "image",
+    mediaUrl: "https://example.com/generated-insert.png",
+    thumbnailUrl: "https://example.com/generated-insert.png",
+    durationSeconds: 3,
+    width: 1280,
+    height: 720,
+    generationPromptSummary: "Create a clearer hinge close-up that preserves the same stand.",
+    warnings: [],
+    usage: {
+      latencyMs: 4800,
+      estimatedCostUsd: 0.08
+    },
+    ...overrides
   };
 }

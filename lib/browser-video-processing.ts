@@ -152,6 +152,34 @@ async function exportCanvasFrame(canvas: HTMLCanvasElement) {
   }
 }
 
+async function captureCanvasFrame(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  width: number,
+  height: number
+) {
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("Canvas rendering is unavailable in this browser.");
+  }
+
+  canvas.width = width;
+  canvas.height = height;
+  context.drawImage(video, 0, 0, width, height);
+
+  const { blob, mimeType } = await exportCanvasFrame(canvas);
+  const imageDataUrl = await blobToDataUrl(blob);
+
+  return {
+    imageDataUrl,
+    mimeType,
+    byteSize: blob.size,
+    width,
+    height
+  };
+}
+
 export async function readSourceVideoMetadata({
   file,
   objectUrl
@@ -191,39 +219,56 @@ export async function extractSourceVideoFrames({
   try {
     await waitForVideoEvent(video, "loadeddata");
 
-    const context = canvas.getContext("2d");
-
-    if (!context) {
-      throw new Error("Canvas rendering is unavailable in this browser.");
-    }
-
     const { width, height } = getScaledDimensions(metadata.width, metadata.height);
-    canvas.width = width;
-    canvas.height = height;
 
     const timestamps = generateFrameCaptureTimestamps(metadata.durationSeconds);
     const frames: SourceVideoFrame[] = [];
 
     for (const [index, targetTimestamp] of timestamps.entries()) {
       await waitForRenderedSeek(video, targetTimestamp);
-      context.drawImage(video, 0, 0, width, height);
-
-      const { blob, mimeType } = await exportCanvasFrame(canvas);
-      const imageDataUrl = await blobToDataUrl(blob);
+      const capturedFrame = await captureCanvasFrame(video, canvas, width, height);
 
       frames.push({
         id: `frame-${index + 1}`,
         timestampSeconds: Number(video.currentTime.toFixed(3)),
-        imageDataUrl,
-        mimeType,
-        width,
-        height,
-        byteSize: blob.size,
+        imageDataUrl: capturedFrame.imageDataUrl,
+        mimeType: capturedFrame.mimeType,
+        width: capturedFrame.width,
+        height: capturedFrame.height,
+        byteSize: capturedFrame.byteSize,
         isSelected: true
       });
     }
 
     return frames;
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
+    disposeVideoElement(video);
+  }
+}
+
+export async function captureSourceVideoFrameAtTimestamp({
+  objectUrl,
+  metadata,
+  timestampSeconds
+}: {
+  objectUrl: string;
+  metadata: SourceVideoMetadata;
+  timestampSeconds: number;
+}) {
+  const video = createVideoElement(objectUrl);
+  const canvas = document.createElement("canvas");
+
+  try {
+    await waitForVideoEvent(video, "loadeddata");
+    await waitForRenderedSeek(video, timestampSeconds);
+    const { width, height } = getScaledDimensions(metadata.width, metadata.height);
+
+    return {
+      timestampSeconds: Number(video.currentTime.toFixed(3)),
+      ...(await captureCanvasFrame(video, canvas, width, height))
+    };
   } finally {
     canvas.width = 0;
     canvas.height = 0;

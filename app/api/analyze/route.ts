@@ -1,48 +1,92 @@
+import { ZodError } from "zod";
 import { NextResponse } from "next/server";
-import { SUPPORTED_VIDEO_TYPES, VIDEO_DURATION_RANGE } from "@/lib/constants";
-import { analysisRequestSchema } from "@/lib/analysis-contract";
-import { generateDemoAnalysis } from "@/lib/demo-analysis";
-import { tutorialAnalysisSchema } from "@/lib/tutorial-schema";
+import { validateAnalysisRequestPayload } from "@/lib/analysis-contract";
+import {
+  AnalysisConfigurationError,
+  AnalysisExecutionError,
+  analyzeTutorial
+} from "@/lib/analysis/analyze-tutorial";
+import { DemoVideoAnalysisProvider } from "@/lib/analysis/demo-video-analysis-provider";
+import { FalVideoAnalysisProvider } from "@/lib/analysis/fal-video-analysis-provider";
+import { UnsafeTaskError } from "@/lib/analysis/safety";
+import { serverEnv } from "@/lib/env";
 
 export async function POST(request: Request) {
   try {
-    const payload = analysisRequestSchema.parse(await request.json());
-    const { durationSeconds, mimeType } = payload.video;
+    const payload = validateAnalysisRequestPayload(await request.json());
+    const result = await analyzeTutorial(payload, {
+      realProvider: serverEnv.falKey
+        ? new FalVideoAnalysisProvider({
+            apiKey: serverEnv.falKey,
+            endpointId: serverEnv.falVisionEndpointId,
+            modelId: serverEnv.falVisionModel
+          })
+        : null,
+      demoProvider: new DemoVideoAnalysisProvider(),
+      demoFallbackEnabled: serverEnv.demoFallbackEnabled
+    });
 
-    if (
-      !SUPPORTED_VIDEO_TYPES.includes(
-        mimeType as (typeof SUPPORTED_VIDEO_TYPES)[number]
-      )
-    ) {
+    console.info("Tutorial analysis completed", {
+      provider: result.provider,
+      model: result.model,
+      fallbackUsed: result.fallbackUsed,
+      selectedFrameCount: result.usage.selectedFrameCount,
+      aggregateImageBytes: result.usage.aggregateImageBytes,
+      latencyMs: result.usage.latencyMs,
+      warnings: result.warnings.length
+    });
+
+    return NextResponse.json(result);
+  } catch (error) {
+    if (error instanceof UnsafeTaskError) {
       return NextResponse.json(
-        { error: "Only MP4 and WebM videos are supported in this MVP." },
-        { status: 400 }
+        {
+          error: error.message
+        },
+        { status: 422 }
       );
     }
 
-    if (
-      durationSeconds < VIDEO_DURATION_RANGE.minSeconds ||
-      durationSeconds > VIDEO_DURATION_RANGE.maxSeconds
-    ) {
+    if (error instanceof ZodError) {
       return NextResponse.json(
         {
-          error: `Video duration must be between ${VIDEO_DURATION_RANGE.minSeconds} and ${VIDEO_DURATION_RANGE.maxSeconds} seconds.`
+          error: "GhostCrew could not validate this analysis request. Check the selected frames, timestamps, and metadata, then try again."
         },
         { status: 400 }
       );
     }
 
-    const analysis = tutorialAnalysisSchema.parse(generateDemoAnalysis(payload));
+    if (error instanceof AnalysisConfigurationError) {
+      return NextResponse.json(
+        {
+          error: error.message
+        },
+        { status: 503 }
+      );
+    }
 
-    return NextResponse.json({ analysis });
-  } catch (error) {
-    console.error("Analysis request failed", error);
+    if (error instanceof AnalysisExecutionError) {
+      return NextResponse.json(
+        {
+          error: error.message
+        },
+        { status: 502 }
+      );
+    }
 
-    return NextResponse.json(
-      {
-        error: "GhostCrew could not analyze this clip. Check the task title, file format, and duration, then try again."
-      },
-      { status: 400 }
-    );
+    if (error instanceof Error) {
+      return NextResponse.json(
+        {
+          error: error.message
+        },
+        { status: 400 }
+      );
+    }
+
+    console.error("Analysis request failed", {
+      type: typeof error
+    });
+
+    return NextResponse.json({ error: "GhostCrew could not analyze this clip." }, { status: 500 });
   }
 }

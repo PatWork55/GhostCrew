@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   analysisRequestSchema,
-  buildAnalysisRequest
+  buildAnalysisRequest,
+  validateAnalysisRequestPayload
 } from "@/lib/analysis-contract";
+import { ANALYSIS_LIMITS } from "@/lib/constants";
+import { createAnalysisRequest, createFrame } from "@/tests/fixtures";
 
 test("buildAnalysisRequest trims fields and sends only selected frames", () => {
   const request = buildAnalysisRequest({
@@ -71,5 +74,54 @@ test("analysisRequestSchema rejects requests without selected frames", () => {
       },
       selectedFrames: []
     })
+  );
+});
+
+test("validateAnalysisRequestPayload rejects malformed Data URLs", () => {
+  const request = createAnalysisRequest({
+    selectedFrames: [
+      {
+        ...createFrame("frame-1", 0.35),
+        imageDataUrl: "data:image/webp;base64,not valid!!!"
+      },
+      createFrame("frame-2", 4.5),
+      createFrame("frame-3", 9.2)
+    ]
+  });
+
+  assert.throws(
+    () => validateAnalysisRequestPayload(request),
+    /malformed image Data URL/
+  );
+});
+
+test("validateAnalysisRequestPayload rejects timestamps outside the video duration", () => {
+  const request = createAnalysisRequest({
+    selectedFrames: [
+      createFrame("frame-1", 0.35),
+      createFrame("frame-2", 4.5),
+      createFrame("frame-3", 30)
+    ]
+  });
+
+  assert.throws(
+    () => validateAnalysisRequestPayload(request),
+    /outside the source-video duration/
+  );
+});
+
+test("validateAnalysisRequestPayload enforces aggregate payload limits", () => {
+  const oversizedLength = Math.ceil(ANALYSIS_LIMITS.maxAggregateFrameBytes / 3) + 1024;
+  const request = createAnalysisRequest({
+    selectedFrames: [
+      createFrame("frame-1", 0.35, oversizedLength),
+      createFrame("frame-2", 4.5, oversizedLength),
+      createFrame("frame-3", 9.2, oversizedLength)
+    ]
+  });
+
+  assert.throws(
+    () => validateAnalysisRequestPayload(request),
+    /aggregate payload limit/
   );
 });

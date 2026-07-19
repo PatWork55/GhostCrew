@@ -20,3 +20,28 @@ export const FRAME_EXTRACTION_LIMITS = {
   maxDimension: 640,
   quality: 0.82
 } as const;
+
+export const ANALYSIS_LIMITS = {
+  minSteps: 3,
+  maxSteps: 6,
+  minSelectedFrames: 3,
+  maxSelectedFrames: 10,
+  maxAggregateFrameBytes: 8 * 1024 * 1024,
+  maxReasoningSummaryLength: 240,
+  minimumStepDurationSeconds: 0.25,
+  maximumOverlapSeconds: 0.35
+} as const;
+
+export const RENDERING_LIMITS = {
+  minimumSegmentDurationSeconds: 0.25,
+  defaultSlowMotionPlaybackRate: 0.5,
+  slowMotionPlaybackRates: [0.5, 0.75] as const,
+  defaultFreezeFrameDurationSeconds: 2,
+  minimumFreezeFrameDurationSeconds: 1.5,
+  maximumFreezeFrameDurationSeconds: 3,
+  defaultCropSize: 0.64,
+  minimumCropSize: 0.4,
+  maximumCropSize: 0.82,
+  defaultAnnotationDurationSeconds: 2,
+  maximumAnnotationTextLength: 80
+} as const;

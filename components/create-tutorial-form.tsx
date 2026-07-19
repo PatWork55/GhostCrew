@@ -1,15 +1,25 @@
 "use client";
 
-import { useState } from "react";
-import { buildAnalysisRequest } from "@/lib/analysis-contract";
-import { FRAME_EXTRACTION_LIMITS, PROJECT, SUPPORTED_VIDEO_TYPES, VIDEO_DURATION_RANGE, VIDEO_UPLOAD_LIMITS } from "@/lib/constants";
+import { useMemo, useState } from "react";
+import {
+  analysisResponseSchema,
+  buildAnalysisRequest,
+  type AnalysisResponse
+} from "@/lib/analysis-contract";
+import {
+  ANALYSIS_LIMITS,
+  FRAME_EXTRACTION_LIMITS,
+  PROJECT,
+  SUPPORTED_VIDEO_TYPES,
+  VIDEO_DURATION_RANGE,
+  VIDEO_UPLOAD_LIMITS
+} from "@/lib/constants";
 import { formatDuration, formatFileSize } from "@/lib/format";
 import { FrameReviewStrip } from "@/components/frame-review-strip";
 import { StoryboardEditor } from "@/components/storyboard-editor";
 import { StatusPill } from "@/components/status-pill";
 import { TutorialPreview } from "@/components/tutorial-preview";
 import { useSourceVideoPipeline } from "@/hooks/use-source-video-pipeline";
-import type { TutorialAnalysis } from "@/lib/tutorial-schema";
 import type { AnalysisStatus, SourceVideoStatus } from "@/types/tutorial";
 
 const DEFAULT_LANGUAGE = "English";
@@ -29,9 +39,11 @@ function getSourceStatusMessage(
     case "extracting_frames":
       return "Extracting representative frames directly in the browser...";
     case "ready_for_analysis":
-      return selectedFrameCount
-        ? `${selectedFrameCount} selected frames are ready for the storyboard request.`
-        : "Select at least one extracted frame before analysis.";
+      if (selectedFrameCount < ANALYSIS_LIMITS.minSelectedFrames) {
+        return `Select at least ${ANALYSIS_LIMITS.minSelectedFrames} frames before analysis.`;
+      }
+
+      return `${selectedFrameCount} selected frames are ready for server-side analysis.`;
     case "error":
       return error || "GhostCrew could not preprocess this clip.";
     default:
@@ -39,13 +51,19 @@ function getSourceStatusMessage(
   }
 }
 
-function getPrimaryStatusLabel(sourceStatus: SourceVideoStatus, analysisStatus: AnalysisStatus) {
+function getPrimaryStatusLabel(
+  sourceStatus: SourceVideoStatus,
+  analysisStatus: AnalysisStatus,
+  analysisResult: AnalysisResponse | null
+) {
   if (analysisStatus === "submitting") {
     return "analysis in progress";
   }
 
-  if (analysisStatus === "ready") {
-    return "storyboard ready";
+  if (analysisResult) {
+    return analysisResult.provider === "fal" && !analysisResult.fallbackUsed
+      ? "AI analysis"
+      : "demo fallback";
   }
 
   switch (sourceStatus) {
@@ -60,7 +78,7 @@ function getPrimaryStatusLabel(sourceStatus: SourceVideoStatus, analysisStatus: 
     case "error":
       return "retry available";
     default:
-      return "demo analysis";
+      return "preprocessing";
   }
 }
 
@@ -72,7 +90,7 @@ export function CreateTutorialForm() {
   const [language, setLanguage] = useState(DEFAULT_LANGUAGE);
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>("idle");
   const [analysisError, setAnalysisError] = useState("");
-  const [analysis, setAnalysis] = useState<TutorialAnalysis | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResponse | null>(null);
   const {
     file,
     previewUrl,
@@ -95,12 +113,18 @@ export function CreateTutorialForm() {
   const activeError = analysisStatus === "error" ? analysisError : sourceError;
   const canAnalyze =
     sourceStatus === "ready_for_analysis" &&
-    selectedFrameCount > 0 &&
+    selectedFrameCount >= ANALYSIS_LIMITS.minSelectedFrames &&
+    selectedFrameCount <= ANALYSIS_LIMITS.maxSelectedFrames &&
     analysisStatus !== "submitting";
   const showVideoPreview =
     Boolean(previewUrl) &&
     Boolean(file) &&
     SUPPORTED_VIDEO_TYPES.includes((file?.type ?? "") as (typeof SUPPORTED_VIDEO_TYPES)[number]);
+  const evidenceFramesById = useMemo(
+    () =>
+      Object.fromEntries((sourceVideo?.frames ?? []).map((frame) => [frame.id, frame])),
+    [sourceVideo?.frames]
+  );
 
   async function submitAnalysisRequest() {
     if (analysisStatus === "submitting") {
@@ -130,16 +154,16 @@ export function CreateTutorialForm() {
         },
         body: JSON.stringify(request)
       });
-      const payload = (await response.json()) as {
-        analysis?: TutorialAnalysis;
+      const rawPayload = (await response.json()) as {
         error?: string;
       };
 
-      if (!response.ok || !payload.analysis) {
-        throw new Error(payload.error ?? "Analysis failed");
+      if (!response.ok) {
+        throw new Error(rawPayload.error ?? "Analysis failed");
       }
 
-      setAnalysis(payload.analysis);
+      const parsedPayload = analysisResponseSchema.parse(rawPayload);
+      setAnalysisResult(parsedPayload);
       setAnalysisStatus("ready");
     } catch (requestError) {
       setAnalysisStatus("error");
@@ -178,15 +202,15 @@ export function CreateTutorialForm() {
               <h1 className="mt-2 text-4xl font-semibold text-white">{PROJECT.tagline}</h1>
               <p className="mt-3 max-w-2xl text-base text-white/68">
                 Upload a rough 10 to 45 second source clip, extract representative frames, and
-                prepare a validated storyboard request without sending raw video to the server yet.
+                analyze them server-side into a validated instructional storyboard.
               </p>
             </div>
             <StatusPill
-              label={getPrimaryStatusLabel(sourceStatus, analysisStatus)}
+              label={getPrimaryStatusLabel(sourceStatus, analysisStatus, analysisResult)}
               tone={
                 sourceStatus === "error" || analysisStatus === "error"
                   ? "warning"
-                  : analysisStatus === "ready" || sourceStatus === "ready_for_analysis"
+                  : analysisResult || sourceStatus === "ready_for_analysis"
                     ? "success"
                     : "neutral"
               }
@@ -239,7 +263,7 @@ export function CreateTutorialForm() {
                   onChange={(event) => {
                     const nextFile = event.target.files?.[0] ?? null;
                     selectFile(nextFile);
-                    setAnalysis(null);
+                    setAnalysisResult(null);
                     setAnalysisStatus("idle");
                     setAnalysisError("");
                   }}
@@ -255,6 +279,8 @@ export function CreateTutorialForm() {
                 {VIDEO_DURATION_RANGE.maxSeconds} seconds. Max upload size:{" "}
                 {Math.round(VIDEO_UPLOAD_LIMITS.maxBytes / (1024 * 1024))} MB. Extracted frames
                 are resized to a maximum dimension of {FRAME_EXTRACTION_LIMITS.maxDimension}px.
+                Analysis accepts {ANALYSIS_LIMITS.minSelectedFrames} to{" "}
+                {ANALYSIS_LIMITS.maxSelectedFrames} selected frames.
               </p>
             </div>
 
@@ -264,31 +290,79 @@ export function CreateTutorialForm() {
               </div>
             ) : null}
 
+            {analysisResult ? (
+              <div className="rounded-2xl border border-white/10 bg-black/25 p-4 text-sm text-white/72">
+                <div className="flex flex-wrap items-center gap-3">
+                  <StatusPill
+                    label={
+                      analysisResult.provider === "fal" && !analysisResult.fallbackUsed
+                        ? "AI analysis"
+                        : "Demo fallback"
+                    }
+                    tone={
+                      analysisResult.provider === "fal" && !analysisResult.fallbackUsed
+                        ? "success"
+                        : "warning"
+                    }
+                  />
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/65">
+                    Model: {analysisResult.model}
+                  </span>
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/65">
+                    {analysisResult.usage.selectedFrameCount} frames
+                  </span>
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/65">
+                    {analysisResult.usage.latencyMs} ms
+                  </span>
+                </div>
+                {analysisResult.warnings.length ? (
+                  <div className="mt-3 space-y-2">
+                    {analysisResult.warnings.map((warning) => (
+                      <p
+                        key={warning}
+                        className="rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100"
+                      >
+                        {warning}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="submit"
                 disabled={!canAnalyze}
                 className="rounded-full bg-accent px-5 py-3 text-sm font-medium text-black transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:bg-accent/50"
               >
-                {analysisStatus === "submitting" ? "Analyzing..." : "Start analysis"}
+                {analysisStatus === "submitting" ? "Running analysis..." : "Start analysis"}
               </button>
               <button
                 type="button"
                 onClick={() => void submitAnalysisRequest()}
-                disabled={!sourceVideo || sourceStatus !== "ready_for_analysis" || analysisStatus === "submitting"}
+                disabled={
+                  !sourceVideo ||
+                  sourceStatus !== "ready_for_analysis" ||
+                  analysisStatus === "submitting"
+                }
                 className="rounded-full border border-white/12 px-5 py-3 text-sm text-white/78 transition hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
               >
-                Regenerate analysis
+                Retry analysis
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  setAnalysis(null);
+                  setAnalysisResult(null);
                   setAnalysisStatus("idle");
                   setAnalysisError("");
                   void reExtractFrames();
                 }}
-                disabled={!sourceVideo || sourceStatus === "extracting_frames" || analysisStatus === "submitting"}
+                disabled={
+                  !sourceVideo ||
+                  sourceStatus === "extracting_frames" ||
+                  analysisStatus === "submitting"
+                }
                 className="rounded-full border border-white/12 px-5 py-3 text-sm text-white/78 transition hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
               >
                 {sourceStatus === "extracting_frames" ? "Extracting frames..." : "Re-extract frames"}
@@ -415,29 +489,56 @@ export function CreateTutorialForm() {
         status={sourceStatus}
         error={sourceError}
         onReExtract={() => {
-          setAnalysis(null);
+          setAnalysisResult(null);
           setAnalysisStatus("idle");
           setAnalysisError("");
           void reExtractFrames();
         }}
         onToggleSelected={(frameId) => {
           toggleFrameSelection(frameId);
-          setAnalysis(null);
+          setAnalysisResult(null);
           setAnalysisStatus("idle");
           setAnalysisError("");
         }}
         onRemove={(frameId) => {
           removeFrame(frameId);
-          setAnalysis(null);
+          setAnalysisResult(null);
           setAnalysisStatus("idle");
           setAnalysisError("");
         }}
       />
 
-      {analysis ? (
+      {analysisResult && sourceVideo && previewUrl ? (
         <div className="space-y-8">
-          <StoryboardEditor analysis={analysis} onChange={setAnalysis} />
-          <TutorialPreview analysis={analysis} sourceVideoUrl={previewUrl} />
+          <StoryboardEditor
+            analysis={analysisResult.analysis}
+            onChange={(nextAnalysis) =>
+              setAnalysisResult((current) =>
+                current
+                  ? {
+                      ...current,
+                      analysis: nextAnalysis
+                    }
+                  : current
+              )
+            }
+            evidenceFramesById={evidenceFramesById}
+          />
+          <TutorialPreview
+            analysis={analysisResult.analysis}
+            sourceVideo={sourceVideo}
+            sourceVideoUrl={previewUrl}
+            onChangeAnalysis={(nextAnalysis) =>
+              setAnalysisResult((current) =>
+                current
+                  ? {
+                      ...current,
+                      analysis: nextAnalysis
+                    }
+                  : current
+              )
+            }
+          />
         </div>
       ) : null}
     </div>

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ANALYSIS_LIMITS } from "@/lib/constants";
 
 export const treatmentSchema = z.enum([
   "keep_original",
@@ -19,13 +20,19 @@ export const tutorialStepSchema = z.object({
   visibility: z.enum(["clear", "partial", "unclear"]),
   viewerRisk: z.string().min(1),
   treatment: treatmentSchema,
-  generationPrompt: z.string().nullable()
+  generationPrompt: z.string().nullable(),
+  evidenceFrameIds: z.array(z.string().min(1)).min(1),
+  confidence: z.number().min(0).max(1),
+  reasoningSummary: z.string().min(1).max(ANALYSIS_LIMITS.maxReasoningSummaryLength)
 });
 
 export const tutorialAnalysisSchema = z.object({
   taskTitle: z.string().min(1),
   summary: z.string().min(1),
-  steps: z.array(tutorialStepSchema).min(3).max(6)
+  steps: z
+    .array(tutorialStepSchema)
+    .min(ANALYSIS_LIMITS.minSteps)
+    .max(ANALYSIS_LIMITS.maxSteps)
 });
 
 export type TutorialAnalysis = z.infer<typeof tutorialAnalysisSchema>;

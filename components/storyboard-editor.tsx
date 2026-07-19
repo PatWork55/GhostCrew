@@ -1,12 +1,14 @@
 "use client";
 
 import { formatDuration } from "@/lib/format";
+import type { SourceVideoFrame } from "@/lib/source-video";
 import type { Treatment, TutorialAnalysis, TutorialStep } from "@/lib/tutorial-schema";
 import { treatmentLabel } from "@/lib/treatment-copy";
 
 type StoryboardEditorProps = {
   analysis: TutorialAnalysis;
   onChange: (analysis: TutorialAnalysis) => void;
+  evidenceFramesById: Record<string, SourceVideoFrame>;
 };
 
 const TREATMENT_OPTIONS: Treatment[] = [
@@ -18,7 +20,11 @@ const TREATMENT_OPTIONS: Treatment[] = [
   "generated_insert"
 ];
 
-export function StoryboardEditor({ analysis, onChange }: StoryboardEditorProps) {
+export function StoryboardEditor({
+  analysis,
+  onChange,
+  evidenceFramesById
+}: StoryboardEditorProps) {
   function updateStep(stepId: string, updater: (step: TutorialStep) => TutorialStep) {
     const next = {
       ...analysis,
@@ -110,7 +116,7 @@ export function StoryboardEditor({ analysis, onChange }: StoryboardEditorProps) 
                   className="w-full rounded-2xl border border-white/12 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-accent/40"
                 />
               </label>
-              <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto]">
+              <div className="grid gap-4 md:grid-cols-3">
                 <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
                   <p className="text-xs uppercase tracking-[0.24em] text-white/40">Visibility</p>
                   <p className="mt-2 text-sm text-white">{step.visibility}</p>
@@ -119,6 +125,47 @@ export function StoryboardEditor({ analysis, onChange }: StoryboardEditorProps) 
                   <p className="text-xs uppercase tracking-[0.24em] text-white/40">Viewer risk</p>
                   <p className="mt-2 text-sm text-white/75">{step.viewerRisk}</p>
                 </div>
+                <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                  <p className="text-xs uppercase tracking-[0.24em] text-white/40">Confidence</p>
+                  <p className="mt-2 text-sm text-white">{Math.round(step.confidence * 100)}%</p>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.24em] text-white/40">Reasoning summary</p>
+                <p className="mt-2 text-sm text-white/75">{step.reasoningSummary}</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+                <p className="text-xs uppercase tracking-[0.24em] text-white/40">Evidence frames</p>
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {step.evidenceFrameIds.map((frameId) => {
+                    const frame = evidenceFramesById[frameId];
+
+                    if (!frame) {
+                      return (
+                        <span
+                          key={frameId}
+                          className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/55"
+                        >
+                          {frameId}
+                        </span>
+                      );
+                    }
+
+                    return (
+                      <div key={frameId} className="w-24">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={frame.imageDataUrl}
+                          alt={`${frameId} evidence`}
+                          className="aspect-video w-full rounded-xl border border-white/10 object-cover"
+                        />
+                        <p className="mt-2 text-xs text-white/55">{frameId}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex justify-end">
                 <button
                   type="button"
                   onClick={() => removeStep(step.id)}

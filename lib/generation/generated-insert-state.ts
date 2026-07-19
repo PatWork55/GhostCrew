@@ -16,7 +16,8 @@ export function canStartGeneratedInsert(input: {
   sessionGenerationCount: number;
 }) {
   const maxAccepted =
-    input.maxAcceptedInsertsPerTutorial ?? GENERATED_INSERT_LIMITS.maxAcceptedInsertsPerTutorial;
+    input.maxAcceptedInsertsPerTutorial ??
+    GENERATED_INSERT_LIMITS.defaultMaxAcceptedInsertsPerTutorial;
 
   if (isGeneratedInsertBusy(input.status)) {
     return false;

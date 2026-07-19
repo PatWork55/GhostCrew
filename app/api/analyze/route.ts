@@ -1,6 +1,10 @@
 import { ZodError } from "zod";
 import { NextResponse } from "next/server";
-import { validateAnalysisRequestPayload } from "@/lib/analysis-contract";
+import {
+  AnalysisPayloadTooLargeError,
+  assertAnalysisRequestTextSize,
+  validateAnalysisRequestPayload
+} from "@/lib/analysis-contract";
 import {
   AnalysisConfigurationError,
   AnalysisExecutionError,
@@ -11,9 +15,26 @@ import { FalVideoAnalysisProvider } from "@/lib/analysis/fal-video-analysis-prov
 import { UnsafeTaskError } from "@/lib/analysis/safety";
 import { serverEnv } from "@/lib/env";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   try {
-    const payload = validateAnalysisRequestPayload(await request.json());
+    const contentLength = Number(request.headers.get("content-length") ?? "0");
+
+    if (
+      Number.isFinite(contentLength) &&
+      contentLength > 0 &&
+      contentLength > 4 * 1024 * 1024
+    ) {
+      throw new AnalysisPayloadTooLargeError(
+        "This analysis request is too large for the deployed demo. Select fewer frames and try again."
+      );
+    }
+
+    const rawBody = await request.text();
+    assertAnalysisRequestTextSize(rawBody);
+    const payload = validateAnalysisRequestPayload(JSON.parse(rawBody) as unknown);
     const result = await analyzeTutorial(payload, {
       realProvider: serverEnv.falKey
         ? new FalVideoAnalysisProvider({
@@ -23,7 +44,7 @@ export async function POST(request: Request) {
           })
         : null,
       demoProvider: new DemoVideoAnalysisProvider(),
-      demoFallbackEnabled: serverEnv.demoFallbackEnabled
+      demoFallbackEnabled: serverEnv.analysisFallbackEnabled
     });
 
     console.info("Tutorial analysis completed", {
@@ -53,6 +74,15 @@ export async function POST(request: Request) {
           error: "GhostCrew could not validate this analysis request. Check the selected frames, timestamps, and metadata, then try again."
         },
         { status: 400 }
+      );
+    }
+
+    if (error instanceof AnalysisPayloadTooLargeError) {
+      return NextResponse.json(
+        {
+          error: error.message
+        },
+        { status: 413 }
       );
     }
 

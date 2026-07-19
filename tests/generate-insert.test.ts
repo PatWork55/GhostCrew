@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   GeneratedInsertConfigurationError,
-  GeneratedInsertExecutionError,
   generateInsert
 } from "@/lib/generation/generate-insert";
 import type {
@@ -45,33 +44,6 @@ test("generateInsert rejects unsafe tasks", async () => {
         })
       }),
     UnsafeTaskError
-  );
-});
-
-test("generateInsert rejects when generation quota is exhausted", async () => {
-  const request = createValidatedGeneratedInsertRequest({
-    tutorialGenerationCount: 2
-  });
-
-  await assert.rejects(
-    () =>
-      generateInsert(request, {
-        imageProvider: new MockGeneratedInsertProvider(() => ({
-          provider: "fal",
-          imageModel: "fal-ai/nano-banana-2/edit",
-          videoModel: null,
-          resultType: "image",
-          mediaUrl: "https://example.com/out.png",
-          thumbnailUrl: "https://example.com/out.png",
-          durationSeconds: 3,
-          width: 1280,
-          height: 720,
-          generationPromptSummary: "summary",
-          warnings: [],
-          estimatedCostUsd: 0.08
-        }))
-      }),
-    GeneratedInsertExecutionError
   );
 });
 
@@ -139,6 +111,31 @@ test("generateInsert falls back to an image result when video was requested", as
 
   assert.equal(result.resultType, "image");
   assert.ok(result.warnings.some((warning) => warning.includes("Video animation")));
+});
+
+test("generateInsert ignores removed client quota fields because they are no longer part of the API contract", async () => {
+  const result = await generateInsert(
+    createValidatedGeneratedInsertRequest(),
+    {
+      imageProvider: new MockGeneratedInsertProvider(() => ({
+        provider: "fal",
+        imageModel: "fal-ai/nano-banana-2/edit",
+        videoModel: null,
+        resultType: "image",
+        mediaUrl: "https://example.com/generated.png",
+        thumbnailUrl: "https://example.com/generated.png",
+        durationSeconds: 3,
+        width: 1280,
+        height: 720,
+        generationPromptSummary: "Create a clearer hinge close-up.",
+        warnings: [],
+        estimatedCostUsd: 0.08
+      }))
+    }
+  );
+
+  assert.equal(result.provider, "fal");
+  assert.equal(result.resultType, "image");
 });
 
 test("generated insert state helpers prevent duplicate submission and media-load misuse", () => {

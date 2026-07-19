@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
-import { GENERATED_INSERT_LIMITS } from "@/lib/constants";
 import { formatDuration } from "@/lib/format";
 import {
   generatedInsertResultSchema,
@@ -23,6 +22,7 @@ import { StatusPill } from "@/components/status-pill";
 type TutorialPreviewProps = {
   analysis: TutorialAnalysis;
   taskDescription: string;
+  generatedInsertMaxPerTutorial: number;
   sourceVideo: SourceVideo;
   sourceVideoUrl: string;
   onChangeAnalysis: (analysis: TutorialAnalysis) => void;
@@ -52,6 +52,7 @@ function parseRenderPlanError(error: unknown) {
 export function TutorialPreview({
   analysis,
   taskDescription,
+  generatedInsertMaxPerTutorial,
   sourceVideo,
   sourceVideoUrl,
   onChangeAnalysis
@@ -271,9 +272,7 @@ export function TutorialPreview({
             byteSize: sourceFrame.byteSize
           },
           outputType: "image",
-          aspectRatio: resolveGeneratedInsertAspectRatio(),
-          tutorialGenerationCount: sessionGenerationCount,
-          acceptedInsertCount
+          aspectRatio: resolveGeneratedInsertAspectRatio()
         })
       });
       const rawPayload = (await response.json()) as {
@@ -507,7 +506,7 @@ export function TutorialPreview({
               generatedInsertReviews={generatedInsertReviews}
               sessionGenerationCount={sessionGenerationCount}
               acceptedInsertCount={acceptedInsertCount}
-              maxAcceptedInsertsPerTutorial={GENERATED_INSERT_LIMITS.maxAcceptedInsertsPerTutorial}
+              maxAcceptedInsertsPerTutorial={generatedInsertMaxPerTutorial}
               onChangeTreatment={updateStepTreatment}
               onUpdateStepOverride={updateStepOverride}
               onResetStepOverride={resetStepOverride}

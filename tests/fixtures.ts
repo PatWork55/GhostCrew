@@ -161,8 +161,6 @@ export function createGeneratedInsertRequest(
     sourceFrame: createFrame("frame-2", 4.5),
     outputType: "image",
     aspectRatio: "16:9",
-    tutorialGenerationCount: 0,
-    acceptedInsertCount: 0,
     ...overrides
   };
 }

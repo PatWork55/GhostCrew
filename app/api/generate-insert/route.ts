@@ -9,12 +9,37 @@ import {
   generateInsert
 } from "@/lib/generation/generate-insert";
 import {
+  GenerationRateLimitError,
+  getClientIpAddress,
+  reserveGeneratedInsertSlot
+} from "@/lib/generation/generation-rate-limit";
+import {
   validateGeneratedInsertRequestPayload
 } from "@/lib/generation/generated-insert-schema";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
+  if (!serverEnv.generatedInsertsEnabled) {
+    return NextResponse.json(
+      {
+        error:
+          "Supplementary-view generation is currently disabled for this deployment."
+      },
+      { status: 503 }
+    );
+  }
+
+  const clientIp = getClientIpAddress(request);
+  let releaseGenerationSlot: (() => void) | null = null;
+
   try {
     const payload = validateGeneratedInsertRequestPayload(await request.json());
+    releaseGenerationSlot = reserveGeneratedInsertSlot(
+      clientIp,
+      serverEnv.generationRateLimitPerHour
+    );
     const result = await generateInsert(payload, {
       imageProvider: serverEnv.falKey
         ? new FalGeneratedInsertProvider({
@@ -37,6 +62,20 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result);
   } catch (error) {
+    if (error instanceof GenerationRateLimitError) {
+      return NextResponse.json(
+        {
+          error: error.message
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(error.retryAfterSeconds)
+          }
+        }
+      );
+    }
+
     if (error instanceof UnsafeTaskError) {
       return NextResponse.json({ error: error.message }, { status: 422 });
     }
@@ -73,5 +112,7 @@ export async function POST(request: Request) {
       },
       { status: 500 }
     );
+  } finally {
+    releaseGenerationSlot?.();
   }
 }

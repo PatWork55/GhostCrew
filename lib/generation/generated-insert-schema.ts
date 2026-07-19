@@ -40,10 +40,9 @@ export const generatedInsertRequestSchema = z
     modelSuggestedPrompt: z.string().trim().max(280).nullable().optional(),
     sourceFrame: selectedSourceVideoFrameSchema,
     outputType: generatedInsertOutputTypeSchema.default("image"),
-    aspectRatio: generatedInsertAspectRatioSchema,
-    tutorialGenerationCount: z.number().int().min(0).max(10),
-    acceptedInsertCount: z.number().int().min(0).max(10)
+    aspectRatio: generatedInsertAspectRatioSchema
   })
+  .strict()
   .superRefine((request, context) => {
     if (!request.evidenceFrameIds.includes(request.sourceFrame.id)) {
       context.addIssue({

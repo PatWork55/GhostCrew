@@ -59,6 +59,16 @@ test("validateGeneratedInsertRequestPayload enforces prompt-length limits", () =
   assert.throws(() => validateGeneratedInsertRequestPayload(request));
 });
 
+test("validateGeneratedInsertRequestPayload rejects deprecated client quota counters", () => {
+  const request = {
+    ...createGeneratedInsertRequest(),
+    tutorialGenerationCount: 1,
+    acceptedInsertCount: 1
+  };
+
+  assert.throws(() => validateGeneratedInsertRequestPayload(request), /Unrecognized key/);
+});
+
 test("generatedInsertRenderStateSchema validates completed insert metadata", () => {
   assert.throws(() =>
     generatedInsertRenderStateSchema.parse({

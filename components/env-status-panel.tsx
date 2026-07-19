@@ -15,15 +15,18 @@ export function EnvStatusPanel() {
       </div>
       <div className="mt-5 grid gap-4 text-sm text-white/70 md:grid-cols-3">
         <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
-          <p className="text-white">App URL</p>
-          <p className="mt-2 break-all text-muted">{serverEnv.appUrl}</p>
+          <p className="text-white">Deployment mode</p>
+          <p className="mt-2 text-muted">
+            Browser preprocessing plus server-side fal calls, with the original source footage kept
+            as truth.
+          </p>
         </div>
         <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
           <p className="text-white">fal usage</p>
           <p className="mt-2 text-muted">
             {serverEnv.falKey
-              ? "Server key detected. Generation routes can be added safely."
-              : "No key required for the current demo analysis slice."}
+              ? "Server key detected. Analysis and supplementary-image routes stay server-side."
+              : "No server key detected. Demo fallback can keep the analysis flow demonstrable."}
           </p>
         </div>
         <div className="rounded-2xl border border-white/8 bg-black/20 p-4">

@@ -26,17 +26,15 @@ export const ANALYSIS_LIMITS = {
   maxSteps: 6,
   minSelectedFrames: 3,
   maxSelectedFrames: 10,
-  maxAggregateFrameBytes: 8 * 1024 * 1024,
+  maxAggregateFrameBytes: Math.round(2.5 * 1024 * 1024),
+  maxSerializedRequestBytes: 4 * 1024 * 1024,
   maxReasoningSummaryLength: 240,
   minimumStepDurationSeconds: 0.25,
   maximumOverlapSeconds: 0.35
 } as const;
 
-const configuredGeneratedInsertLimit =
-  process.env.NEXT_PUBLIC_GENERATED_INSERT_MAX_PER_TUTORIAL === "2" ? 2 : 1;
-
 export const GENERATED_INSERT_LIMITS = {
-  maxAcceptedInsertsPerTutorial: configuredGeneratedInsertLimit,
+  defaultMaxAcceptedInsertsPerTutorial: 1,
   maxGenerationRequestsPerTutorial: 2,
   maxIntentLength: 180,
   maxPromptSummaryLength: 180,
@@ -47,7 +45,8 @@ export const GENERATED_INSERT_LIMITS = {
   defaultImageDisplayDurationSeconds: 3,
   minimumImageDisplayDurationSeconds: 2,
   maximumImageDisplayDurationSeconds: 4,
-  requestTimeoutMs: 60_000
+  requestTimeoutMs: 60_000,
+  defaultRateLimitPerHour: 4
 } as const;
 
 export const RENDERING_LIMITS = {

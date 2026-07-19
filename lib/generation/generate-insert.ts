@@ -69,18 +69,6 @@ export async function generateInsert(
     description: request.taskDescription
   });
 
-  if (request.acceptedInsertCount >= GENERATED_INSERT_LIMITS.maxAcceptedInsertsPerTutorial) {
-    throw new GeneratedInsertExecutionError(
-      `This tutorial already reached the limit of ${GENERATED_INSERT_LIMITS.maxAcceptedInsertsPerTutorial} accepted generated insert${GENERATED_INSERT_LIMITS.maxAcceptedInsertsPerTutorial === 1 ? "" : "s"}.`
-    );
-  }
-
-  if (request.tutorialGenerationCount >= GENERATED_INSERT_LIMITS.maxGenerationRequestsPerTutorial) {
-    throw new GeneratedInsertExecutionError(
-      `This tutorial already used ${GENERATED_INSERT_LIMITS.maxGenerationRequestsPerTutorial} generation requests in the current session.`
-    );
-  }
-
   if (!dependencies.imageProvider) {
     throw new GeneratedInsertConfigurationError(
       "Generated inserts are unavailable because FAL_KEY is not configured."

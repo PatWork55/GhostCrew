@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   analysisRequestSchema,
   buildAnalysisRequest,
+  estimateAnalysisRequestBytes,
+  validateEstimatedAnalysisRequestSize,
   validateAnalysisRequestPayload
 } from "@/lib/analysis-contract";
 import { ANALYSIS_LIMITS } from "@/lib/constants";
@@ -122,6 +124,29 @@ test("validateAnalysisRequestPayload enforces aggregate payload limits", () => {
 
   assert.throws(
     () => validateAnalysisRequestPayload(request),
-    /aggregate payload limit/
+    /Select fewer frames before analysis/
+  );
+});
+
+test("estimateAnalysisRequestBytes reflects serialized Base64 payload size", () => {
+  const request = createAnalysisRequest();
+  const estimatedBytes = estimateAnalysisRequestBytes(request);
+
+  assert.ok(estimatedBytes > request.selectedFrames.reduce((total, frame) => total + frame.byteSize, 0));
+});
+
+test("validateEstimatedAnalysisRequestSize rejects oversized serialized requests", () => {
+  const oversizedLength = Math.ceil(ANALYSIS_LIMITS.maxSerializedRequestBytes / 4) + 8192;
+  const request = createAnalysisRequest({
+    selectedFrames: [
+      createFrame("frame-1", 0.35, oversizedLength),
+      createFrame("frame-2", 4.5, oversizedLength),
+      createFrame("frame-3", 9.2, oversizedLength)
+    ]
+  });
+
+  assert.throws(
+    () => validateEstimatedAnalysisRequestSize(request),
+    /deployment-safe limit/
   );
 });

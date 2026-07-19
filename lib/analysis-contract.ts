@@ -48,6 +48,13 @@ export type ValidatedAnalysisRequest = AnalysisRequest & {
   aggregateImageBytes: number;
 };
 
+export class AnalysisPayloadTooLargeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AnalysisPayloadTooLargeError";
+  }
+}
+
 type BuildAnalysisRequestInput = {
   taskTitle: string;
   description: string;
@@ -67,6 +74,41 @@ export function buildAnalysisRequest(input: BuildAnalysisRequestInput): Analysis
     video: input.sourceVideo.metadata,
     selectedFrames: getSelectedFramesForAnalysis(input.sourceVideo.frames)
   });
+}
+
+export function estimateSerializedJsonBytes(payload: unknown) {
+  return new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+}
+
+export function estimateAnalysisRequestBytes(request: AnalysisRequest) {
+  return estimateSerializedJsonBytes(request);
+}
+
+export function validateEstimatedAnalysisRequestSize(request: AnalysisRequest) {
+  const serializedBytes = estimateAnalysisRequestBytes(request);
+
+  if (serializedBytes > ANALYSIS_LIMITS.maxSerializedRequestBytes) {
+    throw new AnalysisPayloadTooLargeError(
+      `Select fewer frames before analysis. The request is about ${(
+        serializedBytes /
+        (1024 * 1024)
+      ).toFixed(1)} MB after Base64 serialization, which is above the 4 MB deployment-safe limit.`
+    );
+  }
+
+  return serializedBytes;
+}
+
+export function assertAnalysisRequestTextSize(rawText: string) {
+  const serializedBytes = new TextEncoder().encode(rawText).byteLength;
+
+  if (serializedBytes > ANALYSIS_LIMITS.maxSerializedRequestBytes) {
+    throw new AnalysisPayloadTooLargeError(
+      "This analysis request is too large for the deployed demo. Select fewer frames and try again."
+    );
+  }
+
+  return serializedBytes;
 }
 
 const BASE64_DATA_URL_PATTERN =
@@ -121,10 +163,11 @@ export function validateAnalysisRequestPayload(
   }
 
   if (aggregateImageBytes > ANALYSIS_LIMITS.maxAggregateFrameBytes) {
-    throw new Error(
-      `Selected frames exceed the ${Math.round(
-        ANALYSIS_LIMITS.maxAggregateFrameBytes / (1024 * 1024)
-      )} MB aggregate payload limit.`
+    throw new AnalysisPayloadTooLargeError(
+      `Selected frames decode to more than ${(
+        ANALYSIS_LIMITS.maxAggregateFrameBytes /
+        (1024 * 1024)
+      ).toFixed(1)} MB. Select fewer frames before analysis.`
     );
   }
 

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   analysisResponseSchema,
   buildAnalysisRequest,
+  estimateAnalysisRequestBytes,
   type AnalysisResponse
 } from "@/lib/analysis-contract";
 import {
@@ -27,7 +28,8 @@ const DEFAULT_LANGUAGE = "English";
 function getSourceStatusMessage(
   sourceStatus: SourceVideoStatus,
   error: string,
-  selectedFrameCount: number
+  selectedFrameCount: number,
+  payloadLimitMessage: string
 ) {
   switch (sourceStatus) {
     case "idle":
@@ -39,6 +41,10 @@ function getSourceStatusMessage(
     case "extracting_frames":
       return "Extracting representative frames directly in the browser...";
     case "ready_for_analysis":
+      if (payloadLimitMessage) {
+        return payloadLimitMessage;
+      }
+
       if (selectedFrameCount < ANALYSIS_LIMITS.minSelectedFrames) {
         return `Select at least ${ANALYSIS_LIMITS.minSelectedFrames} frames before analysis.`;
       }
@@ -82,7 +88,11 @@ function getPrimaryStatusLabel(
   }
 }
 
-export function CreateTutorialForm() {
+export function CreateTutorialForm({
+  generatedInsertMaxPerTutorial
+}: {
+  generatedInsertMaxPerTutorial: number;
+}) {
   const [taskTitle, setTaskTitle] = useState("Assemble a phone stand");
   const [description, setDescription] = useState(
     "A quick one-angle phone video showing how to unfold and lock a small desk phone stand."
@@ -104,17 +114,85 @@ export function CreateTutorialForm() {
     removeFrame
   } = useSourceVideoPipeline();
 
+  const analysisRequestPreview = useMemo(() => {
+    if (!sourceVideo) {
+      return {
+        request: null,
+        serializedBytes: 0,
+        aggregateImageBytes: 0,
+        error: ""
+      };
+    }
+
+    try {
+      const request = buildAnalysisRequest({
+        taskTitle,
+        description,
+        language,
+        sourceVideo
+      });
+      const aggregateImageBytes = request.selectedFrames.reduce(
+        (total, frame) => total + frame.byteSize,
+        0
+      );
+      const serializedBytes = estimateAnalysisRequestBytes(request);
+
+      if (aggregateImageBytes > ANALYSIS_LIMITS.maxAggregateFrameBytes) {
+        return {
+          request,
+          serializedBytes,
+          aggregateImageBytes,
+          error: `Select fewer frames before analysis. The selected frames decode to ${(
+            aggregateImageBytes /
+            (1024 * 1024)
+          ).toFixed(1)} MB, which is above the 2.5 MB server limit.`
+        };
+      }
+
+      if (serializedBytes > ANALYSIS_LIMITS.maxSerializedRequestBytes) {
+        return {
+          request,
+          serializedBytes,
+          aggregateImageBytes,
+          error: `Select fewer frames before analysis. This request would be about ${(
+            serializedBytes /
+            (1024 * 1024)
+          ).toFixed(1)} MB after Base64 serialization, which is above the 4 MB deployment-safe limit.`
+        };
+      }
+
+      return {
+        request,
+        serializedBytes,
+        aggregateImageBytes,
+        error: ""
+      };
+    } catch (error) {
+      return {
+        request: null,
+        serializedBytes: 0,
+        aggregateImageBytes: 0,
+        error:
+          error instanceof Error
+            ? error.message
+            : "GhostCrew could not prepare the analysis request."
+      };
+    }
+  }, [description, language, sourceVideo, taskTitle]);
+
   const selectedFrameCount = selectedFrames.length;
   const sourceStatusMessage = getSourceStatusMessage(
     sourceStatus,
     sourceError,
-    selectedFrameCount
+    selectedFrameCount,
+    analysisRequestPreview.error
   );
   const activeError = analysisStatus === "error" ? analysisError : sourceError;
   const canAnalyze =
     sourceStatus === "ready_for_analysis" &&
     selectedFrameCount >= ANALYSIS_LIMITS.minSelectedFrames &&
     selectedFrameCount <= ANALYSIS_LIMITS.maxSelectedFrames &&
+    !analysisRequestPreview.error &&
     analysisStatus !== "submitting";
   const showVideoPreview =
     Boolean(previewUrl) &&
@@ -138,12 +216,18 @@ export function CreateTutorialForm() {
     }
 
     try {
-      const request = buildAnalysisRequest({
-        taskTitle,
-        description,
-        language,
-        sourceVideo
-      });
+      const request =
+        analysisRequestPreview.request ??
+        buildAnalysisRequest({
+          taskTitle,
+          description,
+          language,
+          sourceVideo
+        });
+
+      if (analysisRequestPreview.error) {
+        throw new Error(analysisRequestPreview.error);
+      }
 
       setAnalysisError("");
       setAnalysisStatus("submitting");
@@ -282,11 +366,33 @@ export function CreateTutorialForm() {
                 Analysis accepts {ANALYSIS_LIMITS.minSelectedFrames} to{" "}
                 {ANALYSIS_LIMITS.maxSelectedFrames} selected frames.
               </p>
+              {analysisRequestPreview.request ? (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.22em] text-white/40">
+                      Decoded frame payload
+                    </p>
+                    <p className="mt-2 text-sm text-white/78">
+                      {formatFileSize(analysisRequestPreview.aggregateImageBytes)} /{" "}
+                      {formatFileSize(ANALYSIS_LIMITS.maxAggregateFrameBytes)}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                    <p className="text-xs uppercase tracking-[0.22em] text-white/40">
+                      Estimated request size
+                    </p>
+                    <p className="mt-2 text-sm text-white/78">
+                      {formatFileSize(analysisRequestPreview.serializedBytes)} /{" "}
+                      {formatFileSize(ANALYSIS_LIMITS.maxSerializedRequestBytes)}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
-            {activeError ? (
+            {activeError || analysisRequestPreview.error ? (
               <div className="rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">
-                {activeError}
+                {activeError || analysisRequestPreview.error}
               </div>
             ) : null}
 
@@ -527,6 +633,7 @@ export function CreateTutorialForm() {
           <TutorialPreview
             analysis={analysisResult.analysis}
             taskDescription={description}
+            generatedInsertMaxPerTutorial={generatedInsertMaxPerTutorial}
             sourceVideo={sourceVideo}
             sourceVideoUrl={previewUrl}
             onChangeAnalysis={(nextAnalysis) =>

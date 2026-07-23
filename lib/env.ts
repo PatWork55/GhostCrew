@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { GENERATED_INSERT_LIMITS } from "@/lib/constants";
+import { GENERATED_INSERT_LIMITS, NARRATION_LIMITS } from "@/lib/constants";
 
 const envSchema = z.object({
   FAL_KEY: z.string().trim().optional(),
@@ -8,6 +8,8 @@ const envSchema = z.object({
   FAL_VISION_MODEL: z.string().trim().default("google/gemini-2.5-flash"),
   FAL_IMAGE_EDIT_ENDPOINT_ID: z.string().trim().default("fal-ai/nano-banana-2/edit"),
   FAL_IMAGE_EDIT_MODEL: z.string().trim().default("fal-ai/nano-banana-2/edit"),
+  FAL_TTS_ENDPOINT_ID: z.string().trim().default("fal-ai/elevenlabs/tts/eleven-v3"),
+  FAL_TTS_DEFAULT_VOICE: z.string().trim().default(NARRATION_LIMITS.defaultVoice),
   ANALYSIS_FALLBACK_ENABLED: z.enum(["true", "false"]).optional(),
   GENERATED_INSERTS_ENABLED: z.enum(["true", "false"]).default("false"),
   GENERATED_INSERT_MAX_PER_TUTORIAL: z.enum(["1", "2"]).default("1"),
@@ -27,6 +29,8 @@ const parsed = envSchema.parse({
   FAL_VISION_MODEL: process.env.FAL_VISION_MODEL,
   FAL_IMAGE_EDIT_ENDPOINT_ID: process.env.FAL_IMAGE_EDIT_ENDPOINT_ID,
   FAL_IMAGE_EDIT_MODEL: process.env.FAL_IMAGE_EDIT_MODEL,
+  FAL_TTS_ENDPOINT_ID: process.env.FAL_TTS_ENDPOINT_ID,
+  FAL_TTS_DEFAULT_VOICE: process.env.FAL_TTS_DEFAULT_VOICE,
   ANALYSIS_FALLBACK_ENABLED: process.env.ANALYSIS_FALLBACK_ENABLED,
   GENERATED_INSERTS_ENABLED: process.env.GENERATED_INSERTS_ENABLED,
   GENERATED_INSERT_MAX_PER_TUTORIAL: process.env.GENERATED_INSERT_MAX_PER_TUTORIAL,
@@ -41,6 +45,8 @@ export const serverEnv = {
   falVisionModel: parsed.FAL_VISION_MODEL,
   falImageEditEndpointId: parsed.FAL_IMAGE_EDIT_ENDPOINT_ID,
   falImageEditModel: parsed.FAL_IMAGE_EDIT_MODEL,
+  falTtsEndpointId: parsed.FAL_TTS_ENDPOINT_ID,
+  falTtsDefaultVoice: parsed.FAL_TTS_DEFAULT_VOICE,
   demoMode: parsed.NEXT_PUBLIC_DEMO_MODE === "true",
   analysisFallbackEnabled:
     (parsed.ANALYSIS_FALLBACK_ENABLED ??

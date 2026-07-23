@@ -4,6 +4,8 @@ import type {
   GeneratedInsertResult,
   ValidatedGeneratedInsertRequest
 } from "@/lib/generation/generated-insert-schema";
+import type { DirectVideoUnderstanding } from "@/lib/production/direct-video-understanding";
+import type { AnalysisResponse } from "@/lib/analysis-contract";
 import type { TutorialAnalysis } from "@/lib/tutorial-schema";
 
 export function createFrame(frameId: string, timestampSeconds: number, byteLength = 12) {
@@ -196,6 +198,106 @@ export function createGeneratedInsertResult(
     usage: {
       latencyMs: 4800,
       estimatedCostUsd: 0.08
+    },
+    ...overrides
+  };
+}
+
+export function createDirectVideoUnderstanding(
+  overrides: Partial<DirectVideoUnderstanding> = {}
+): DirectVideoUnderstanding {
+  return {
+    taskTitle: "Assemble a phone stand",
+    factualSummary:
+      "A folded phone stand is opened, the support arm is raised, and the angle is locked.",
+    objects: [
+      {
+        id: "object-1",
+        name: "support arm",
+        description: "The hinged arm that lifts to create the viewing angle.",
+        visualEvidenceFrameIds: ["frame-2", "frame-3"],
+        confidence: 0.92
+      },
+      {
+        id: "object-2",
+        name: "base",
+        description: "The lower platform that unfolds and supports the stand.",
+        visualEvidenceFrameIds: ["frame-1", "frame-2"],
+        confidence: 0.89
+      }
+    ],
+    chronologicalActions: [
+      {
+        id: "action-1",
+        title: "Show the folded stand",
+        startTime: 0,
+        endTime: 4.5,
+        description: "The folded stand is shown before any movement begins.",
+        handsOrTools: ["hand"],
+        spatialRelationship: "The folded arm rests against the base.",
+        viewerNeedsToUnderstand: "Understand the starting orientation.",
+        visibleIssues: ["orientation_confusing"],
+        recommendedAlternativeVisual: null,
+        evidenceSummary: "The beginning orientation is visible but could use a label.",
+        confidence: 0.78
+      },
+      {
+        id: "action-2",
+        title: "Raise the support arm",
+        startTime: 4.5,
+        endTime: 10,
+        description: "The support arm is lifted away from the base hinge.",
+        handsOrTools: ["hand"],
+        spatialRelationship: "The arm rotates upward from the hinge.",
+        viewerNeedsToUnderstand: "See the hinge motion clearly.",
+        visibleIssues: ["too_small", "poor_framing"],
+        recommendedAlternativeVisual: "A tighter moving close-up would clarify the hinge.",
+        evidenceSummary: "The hinge is present but small in the frame.",
+        confidence: 0.82
+      },
+      {
+        id: "action-3",
+        title: "Lock the angle",
+        startTime: 10,
+        endTime: 16,
+        description: "The hinge is pushed until the stand reaches its final angle.",
+        handsOrTools: ["hand"],
+        spatialRelationship: "The support arm presses against the base until it clicks into place.",
+        viewerNeedsToUnderstand: "Notice the locking moment and final angle.",
+        visibleIssues: ["too_fast"],
+        recommendedAlternativeVisual: null,
+        evidenceSummary: "The locking motion happens quickly.",
+        confidence: 0.87
+      }
+    ],
+    momentsTooFast: ["action-3"],
+    momentsTooSmall: ["action-2"],
+    hiddenDetails: [],
+    alternativeExplanationMoments: ["action-2"],
+    safetyConcerns: [],
+    uncertaintySummary: "The clip is clear overall, but the hinge detail is small.",
+    overallConfidence: 0.85,
+    ...overrides
+  };
+}
+
+export function createAnalysisResponse(
+  overrides: Partial<AnalysisResponse> = {}
+): AnalysisResponse {
+  return {
+    analysis: createTutorialAnalysis(),
+    provider: "fal",
+    model: "google/gemini-2.5-flash",
+    fallbackUsed: false,
+    warnings: [],
+    providerUsage: {
+      costUsd: 0.002,
+      totalTokens: 2500
+    },
+    usage: {
+      selectedFrameCount: 5,
+      aggregateImageBytes: 60,
+      latencyMs: 4200
     },
     ...overrides
   };

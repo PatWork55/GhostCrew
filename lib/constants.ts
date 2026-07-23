@@ -62,3 +62,30 @@ export const RENDERING_LIMITS = {
   defaultAnnotationDurationSeconds: 2,
   maximumAnnotationTextLength: 80
 } as const;
+
+export const NARRATION_LIMITS = {
+  defaultVoice: "Rachel",
+  supportedVoices: ["Rachel", "Aria", "Sarah", "Laura", "Roger"] as const,
+  defaultAudioMode: "mute_source" as const,
+  maximumSegmentTextLength: 320,
+  maximumToneLength: 120,
+  maximumPronunciationsPerSegment: 8,
+  maximumWordsPerSubtitleCue: 6,
+  maximumSubtitleCharactersPerCue: 42,
+  subtitleLineBreakThreshold: 24,
+  defaultSpeechPaddingSeconds: 0.15
+} as const;
+
+export const EXPORT_LIMITS = {
+  renderFps: 30,
+  audioSampleRate: 44_100,
+  audioBitrate: "192k" as const,
+  videoCrf: 18,
+  videoPreset: "veryfast" as const,
+  requestTimeoutMs: 240_000,
+  maximumSubtitleLines: 2,
+  defaultSourceAudioVolume: 0.18,
+  exportDirectoryPrefix: "ghostcrew-exports",
+  reportFileName: "process-report.json",
+  outputFileName: "ghostcrew-tutorial.mp4"
+} as const;

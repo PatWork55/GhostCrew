@@ -21,9 +21,15 @@ import { StoryboardEditor } from "@/components/storyboard-editor";
 import { StatusPill } from "@/components/status-pill";
 import { TutorialPreview } from "@/components/tutorial-preview";
 import { useSourceVideoPipeline } from "@/hooks/use-source-video-pipeline";
+import {
+  productionPlanResponseSchema,
+  type ProductionPlanResponse
+} from "@/lib/production/production-plan-contract";
+import { ProductionWorkspace } from "@/components/production-workspace";
 import type { AnalysisStatus, SourceVideoStatus } from "@/types/tutorial";
 
 const DEFAULT_LANGUAGE = "English";
+type ProductionPlanStatus = "idle" | "submitting" | "ready" | "error";
 
 function getSourceStatusMessage(
   sourceStatus: SourceVideoStatus,
@@ -101,6 +107,10 @@ export function CreateTutorialForm({
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>("idle");
   const [analysisError, setAnalysisError] = useState("");
   const [analysisResult, setAnalysisResult] = useState<AnalysisResponse | null>(null);
+  const [productionPlanStatus, setProductionPlanStatus] = useState<ProductionPlanStatus>("idle");
+  const [productionPlanError, setProductionPlanError] = useState("");
+  const [productionPlanResult, setProductionPlanResult] =
+    useState<ProductionPlanResponse | null>(null);
   const {
     file,
     previewUrl,
@@ -113,6 +123,12 @@ export function CreateTutorialForm({
     toggleFrameSelection,
     removeFrame
   } = useSourceVideoPipeline();
+
+  function resetProductionPlanState() {
+    setProductionPlanResult(null);
+    setProductionPlanStatus("idle");
+    setProductionPlanError("");
+  }
 
   const analysisRequestPreview = useMemo(() => {
     if (!sourceVideo) {
@@ -249,6 +265,7 @@ export function CreateTutorialForm({
       const parsedPayload = analysisResponseSchema.parse(rawPayload);
       setAnalysisResult(parsedPayload);
       setAnalysisStatus("ready");
+      resetProductionPlanState();
     } catch (requestError) {
       setAnalysisStatus("error");
       setAnalysisError(
@@ -269,6 +286,56 @@ export function CreateTutorialForm({
     }
 
     await submitAnalysisRequest();
+  }
+
+  async function submitProductionPlanRequest() {
+    if (productionPlanStatus === "submitting") {
+      return;
+    }
+
+    if (!file || !sourceVideo || !analysisResult) {
+      setProductionPlanStatus("error");
+      setProductionPlanError("Run and review the storyboard analysis before building the production plan.");
+      return;
+    }
+
+    if (!analysisRequestPreview.request) {
+      setProductionPlanStatus("error");
+      setProductionPlanError("GhostCrew could not prepare the production-plan request.");
+      return;
+    }
+
+    try {
+      setProductionPlanStatus("submitting");
+      setProductionPlanError("");
+      const formData = new FormData();
+      formData.set("video", file);
+      formData.set("request", JSON.stringify(analysisRequestPreview.request));
+      formData.set("storyboard", JSON.stringify(analysisResult));
+
+      const response = await fetch("/api/production-plan", {
+        method: "POST",
+        body: formData
+      });
+      const rawPayload = (await response.json()) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(rawPayload.error ?? "Production-plan creation failed.");
+      }
+
+      const parsedPayload = productionPlanResponseSchema.parse(rawPayload);
+      setProductionPlanResult(parsedPayload);
+      setProductionPlanStatus("ready");
+    } catch (error) {
+      setProductionPlanStatus("error");
+      setProductionPlanError(
+        error instanceof Error
+          ? error.message
+          : "GhostCrew could not build the production plan."
+      );
+    }
   }
 
   return (
@@ -308,6 +375,11 @@ export function CreateTutorialForm({
                 required
                 value={taskTitle}
                 onChange={(event) => setTaskTitle(event.target.value)}
+                onBlur={() => {
+                  if (productionPlanResult) {
+                    resetProductionPlanState();
+                  }
+                }}
                 className="w-full rounded-2xl border border-white/12 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-accent/40"
                 placeholder="Assemble a phone stand"
               />
@@ -319,6 +391,11 @@ export function CreateTutorialForm({
                 rows={4}
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
+                onBlur={() => {
+                  if (productionPlanResult) {
+                    resetProductionPlanState();
+                  }
+                }}
                 className="w-full rounded-2xl border border-white/12 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-accent/40"
                 placeholder="Optional context for the tutorial"
               />
@@ -329,7 +406,12 @@ export function CreateTutorialForm({
                 <span className="text-sm text-white/70">Tutorial language</span>
                 <select
                   value={language}
-                  onChange={(event) => setLanguage(event.target.value)}
+                  onChange={(event) => {
+                    setLanguage(event.target.value);
+                    if (productionPlanResult) {
+                      resetProductionPlanState();
+                    }
+                  }}
                   className="w-full rounded-2xl border border-white/12 bg-black/30 px-4 py-3 text-white outline-none transition focus:border-accent/40"
                 >
                   <option>English</option>
@@ -350,6 +432,7 @@ export function CreateTutorialForm({
                     setAnalysisResult(null);
                     setAnalysisStatus("idle");
                     setAnalysisError("");
+                    resetProductionPlanState();
                   }}
                   className="block w-full rounded-2xl border border-dashed border-white/18 bg-black/25 px-4 py-[0.82rem] text-sm text-white/75 file:mr-4 file:rounded-full file:border-0 file:bg-accent file:px-4 file:py-2 file:text-sm file:font-medium file:text-black"
                 />
@@ -393,6 +476,12 @@ export function CreateTutorialForm({
             {activeError || analysisRequestPreview.error ? (
               <div className="rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">
                 {activeError || analysisRequestPreview.error}
+              </div>
+            ) : null}
+
+            {productionPlanError ? (
+              <div className="rounded-2xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-100">
+                {productionPlanError}
               </div>
             ) : null}
 
@@ -462,6 +551,7 @@ export function CreateTutorialForm({
                   setAnalysisResult(null);
                   setAnalysisStatus("idle");
                   setAnalysisError("");
+                  resetProductionPlanState();
                   void reExtractFrames();
                 }}
                 disabled={
@@ -472,6 +562,23 @@ export function CreateTutorialForm({
                 className="rounded-full border border-white/12 px-5 py-3 text-sm text-white/78 transition hover:border-white/25 hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
               >
                 {sourceStatus === "extracting_frames" ? "Extracting frames..." : "Re-extract frames"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitProductionPlanRequest()}
+                disabled={
+                  !file ||
+                  !sourceVideo ||
+                  !analysisResult ||
+                  !!analysisRequestPreview.error ||
+                  productionPlanStatus === "submitting" ||
+                  analysisStatus === "submitting"
+                }
+                className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-5 py-3 text-sm text-cyan-100 transition hover:border-cyan-400/35 hover:bg-cyan-400/15 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                {productionPlanStatus === "submitting"
+                  ? "Building production plan..."
+                  : "Build production plan"}
               </button>
             </div>
           </div>
@@ -598,6 +705,7 @@ export function CreateTutorialForm({
           setAnalysisResult(null);
           setAnalysisStatus("idle");
           setAnalysisError("");
+          resetProductionPlanState();
           void reExtractFrames();
         }}
         onToggleSelected={(frameId) => {
@@ -605,12 +713,14 @@ export function CreateTutorialForm({
           setAnalysisResult(null);
           setAnalysisStatus("idle");
           setAnalysisError("");
+          resetProductionPlanState();
         }}
         onRemove={(frameId) => {
           removeFrame(frameId);
           setAnalysisResult(null);
           setAnalysisStatus("idle");
           setAnalysisError("");
+          resetProductionPlanState();
         }}
       />
 
@@ -618,7 +728,8 @@ export function CreateTutorialForm({
         <div className="space-y-8">
           <StoryboardEditor
             analysis={analysisResult.analysis}
-            onChange={(nextAnalysis) =>
+            onChange={(nextAnalysis) => {
+              resetProductionPlanState();
               setAnalysisResult((current) =>
                 current
                   ? {
@@ -626,8 +737,8 @@ export function CreateTutorialForm({
                       analysis: nextAnalysis
                     }
                   : current
-              )
-            }
+              );
+            }}
             evidenceFramesById={evidenceFramesById}
           />
           <TutorialPreview
@@ -636,7 +747,8 @@ export function CreateTutorialForm({
             generatedInsertMaxPerTutorial={generatedInsertMaxPerTutorial}
             sourceVideo={sourceVideo}
             sourceVideoUrl={previewUrl}
-            onChangeAnalysis={(nextAnalysis) =>
+            onChangeAnalysis={(nextAnalysis) => {
+              resetProductionPlanState();
               setAnalysisResult((current) =>
                 current
                   ? {
@@ -644,9 +756,21 @@ export function CreateTutorialForm({
                       analysis: nextAnalysis
                     }
                   : current
-              )
-            }
+              );
+            }}
           />
+          {productionPlanResult ? (
+            <ProductionWorkspace
+              result={productionPlanResult}
+              sourceVideoFile={file!}
+              onRebuild={() => {
+                void submitProductionPlanRequest();
+              }}
+              onUpdateResult={(nextResult) => {
+                setProductionPlanResult(nextResult);
+              }}
+            />
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -185,10 +185,13 @@ export function ProductionWorkspace({
       });
       const rawPayload = (await response.json()) as {
         error?: string;
+        reason?: string;
       };
 
       if (!response.ok) {
-        throw new Error(rawPayload.error ?? "GhostCrew could not render the final MP4.");
+        throw new Error(
+          rawPayload.reason ?? rawPayload.error ?? "GhostCrew could not render the final MP4."
+        );
       }
 
       const parsedPayload = tutorialExportResponseSchema.parse(rawPayload);

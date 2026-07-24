@@ -1,6 +1,11 @@
 import type { AnalysisRequest } from "@/lib/analysis-contract";
 import type { TutorialAnalysis } from "@/lib/tutorial-schema";
 
+export type TaskSafetyResult = {
+  unsafe: boolean;
+  reason: string | null;
+};
+
 const UNSAFE_TASK_RULES = [
   {
     reason: "GhostCrew does not support medical or health-procedure tutorials.",
@@ -72,12 +77,55 @@ function findUnsafeReason(text: string) {
   return null;
 }
 
-export function detectUnsafeTask(request: Pick<AnalysisRequest, "taskTitle" | "description">) {
+export function detectUnsafeTask(
+  request: Pick<AnalysisRequest, "taskTitle" | "description">
+): TaskSafetyResult {
   const combined = [request.taskTitle, request.description ?? ""].join(" ").trim();
   const reason = findUnsafeReason(combined);
 
   return {
     unsafe: Boolean(reason),
+    reason
+  };
+}
+
+export function normalizeTaskSafetyResult(
+  result: unknown,
+  fallbackReason = "GhostCrew could not verify that this export request is safe."
+): TaskSafetyResult {
+  if (!result || typeof result !== "object") {
+    return {
+      unsafe: true,
+      reason: fallbackReason
+    };
+  }
+
+  const record = result as {
+    unsafe?: unknown;
+    reason?: unknown;
+  };
+
+  if (typeof record.unsafe !== "boolean") {
+    return {
+      unsafe: true,
+      reason: fallbackReason
+    };
+  }
+
+  const reason =
+    typeof record.reason === "string" && record.reason.trim().length > 0
+      ? record.reason.trim()
+      : null;
+
+  if (record.unsafe) {
+    return {
+      unsafe: true,
+      reason: reason ?? fallbackReason
+    };
+  }
+
+  return {
+    unsafe: false,
     reason
   };
 }

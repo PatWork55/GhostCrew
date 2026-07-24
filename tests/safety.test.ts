@@ -3,7 +3,8 @@ import test from "node:test";
 import {
   UnsafeTaskError,
   assertSafeTask,
-  detectUnsafeTask
+  detectUnsafeTask,
+  normalizeTaskSafetyResult
 } from "@/lib/analysis/safety";
 
 test("detectUnsafeTask flags electrical repair requests", () => {
@@ -25,4 +26,23 @@ test("assertSafeTask throws for unsafe tasks", () => {
       }),
     UnsafeTaskError
   );
+});
+
+test("detectUnsafeTask does not flag a harmless bottle-opening tutorial", () => {
+  const result = detectUnsafeTask({
+    taskTitle: "Open a bottle",
+    description: "Show how to loosen the cap and pour into a glass."
+  });
+
+  assert.equal(result.unsafe, false);
+  assert.equal(result.reason, null);
+});
+
+test("normalizeTaskSafetyResult rejects malformed safety output", () => {
+  const result = normalizeTaskSafetyResult({
+    reason: null
+  });
+
+  assert.equal(result.unsafe, true);
+  assert.match(result.reason ?? "", /could not verify/i);
 });

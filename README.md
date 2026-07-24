@@ -2,7 +2,7 @@
 
 Film once. Teach clearly.
 
-GhostCrew turns one rough phone recording of a simple physical task into a clearer tutorial. The app analyzes selected frames from the clip, builds a structured storyboard, applies deterministic instructional treatments to the original footage, and optionally adds one explicitly approved AI-generated supplementary view.
+GhostCrew turns one rough phone recording of a simple physical task into a clearer tutorial. The app analyzes selected frames from the clip, builds a structured storyboard, derives a direct-video-backed production plan, applies deterministic instructional treatments to the original footage, optionally adds one explicitly approved AI-generated supplementary view, and can render a downloadable MP4 with subtitles and optional TTS narration.
 
 ## Problem
 
@@ -48,6 +48,9 @@ GhostCrew is not just an editor and not a full generative-video system. It uses 
 - browser-based enhanced tutorial playback
 - crop close-up, slow motion, freeze frame, and annotation treatments
 - explicit fal-powered supplementary still generation with accept/reject review
+- direct-video production planning with extracted source segments
+- editable narration draft, source-audio mix selection, and subtitle timing
+- deterministic MP4 export plus downloadable process report
 - before/after comparison view
 
 ## Architecture
@@ -69,14 +72,22 @@ flowchart TD
   I --> J
   J --> K[Chronology and treatment post-processing]
   K --> L[Editable storyboard]
-  L --> M[Serializable render plan]
-  L --> N[POST /api/generate-insert]
-  N --> O[Server validation and rate limiting]
-  O --> P[fal image edit provider]
-  P --> Q[Accept or reject review]
-  Q -->|Accept| M
-  Q -->|Reject or fail| R[Keep deterministic fallback]
-  M --> S[Browser enhanced player]
+  L --> M[Serializable browser render plan]
+  M --> N[Browser enhanced player]
+  L --> O[POST /api/generate-insert]
+  O --> P[Server validation and rate limiting]
+  P --> Q[fal image edit provider]
+  Q --> R[Accept or reject review]
+  R -->|Accept| M
+  R -->|Reject or fail| S[Keep deterministic fallback]
+  L --> T[POST /api/production-plan]
+  T --> U[Direct video understanding plus source segment extraction]
+  U --> V[Validated production plan]
+  V --> W[Production workspace]
+  W --> X[POST /api/export]
+  X --> Y[TTS or subtitles-only fallback]
+  Y --> Z[ffmpeg MP4 render plus report]
+  Z --> AA[Download API routes]
 ```
 
 ## AI Workflow
@@ -85,10 +96,13 @@ flowchart TD
 2. The user selects the frames that best represent the task.
 3. `POST /api/analyze` validates the request, enforces size limits, screens for unsafe tasks, and calls either the real fal analysis provider or the demo fallback.
 4. The validated storyboard is editable in the UI.
-5. The browser builds a strict render plan from the storyboard plus source-video metadata.
+5. The browser builds a strict render plan from the storyboard plus source-video metadata for deterministic preview playback.
 6. The enhanced player reuses the original video as the factual source and applies deterministic treatments.
 7. If the user explicitly requests one generated insert, `POST /api/generate-insert` validates the selected evidence frame, rate-limits the request, and asks fal for a supplementary still image.
-8. The user must accept that result before it enters playback.
+8. The user must accept that result before it enters preview playback.
+9. `POST /api/production-plan` validates the same uploaded video, optionally calls fal direct video understanding, extracts source clips, and returns a chronological production plan.
+10. The production workspace lets the user inspect segment clips, choose a voice, choose source-audio behavior, and edit narration lines derived from narration-safe visual facts.
+11. `POST /api/export` renders a downloadable MP4 and JSON report. If TTS is unavailable or fails, GhostCrew preserves the visual timeline and exports subtitles only.
 
 ## fal Models
 
@@ -131,6 +145,28 @@ Researched but intentionally not integrated:
 
 - `fal-ai/kling-video/o3/standard/image-to-video`
 
+### Direct Video Understanding
+
+- Endpoint ID: `fal-ai/video-understanding`
+- Purpose: analyze the uploaded source clip during production planning and improve segment extraction, pacing, and narration-safe facts
+
+Why it was selected:
+
+- processes the full uploaded video instead of only selected frames
+- improves chronology and “too fast / too small” detection for the export path
+- can fail safely into a deterministic frame-based fallback
+
+### Narration TTS
+
+- Endpoint ID: `fal-ai/elevenlabs/tts/eleven-v3`
+- Purpose: synthesize optional narration audio and word timestamps for subtitle cueing during export
+
+Why it was selected:
+
+- hosted audio URL returned by the provider
+- word-level timestamp support for synchronized subtitles
+- same server-side fal credential flow as the other providers
+
 ## Official Parameters Used
 
 ### Analysis request to fal
@@ -154,6 +190,24 @@ Researched but intentionally not integrated:
 - `resolution`
 - `safety_tolerance`
 - `limit_generations`
+
+### Direct-video-understanding request to fal
+
+- `video_url`
+- `prompt`
+- `detailed_analysis`
+
+### TTS request to fal
+
+- `text`
+- `voice`
+- `stability`
+- `speed`
+- `language_code`
+- `timestamps`
+- `output_format`
+- `previous_text`
+- `next_text`
 
 ## Supported Inputs And Limits
 
@@ -179,6 +233,14 @@ Generated-insert constraints:
 - max reference-frame payload: `2 MB`
 - max intent length: `180` characters
 - image generation only in this version
+
+Narration and export constraints:
+
+- supported default voices: `Rachel`, `Aria`, `Sarah`, `Laura`, `Roger`
+- max narration segment text: `320` characters
+- subtitle cue target: at most `6` words and `42` characters per cue
+- max subtitle lines in export burn-in: `2`
+- final render target: `30 fps` MP4 with `44.1 kHz` audio
 
 The client estimates request size before submission and blocks oversized analysis requests with a clear “select fewer frames” message. The API independently validates the decoded payload and request-body size.
 
@@ -211,6 +273,15 @@ Current treatment notes:
 - `crop_close_up` uses deterministic CSS transforms, not tracking
 - `generated_insert` falls back to deterministic playback until a result is accepted
 
+## Production Plan And Export Layer
+
+The second stage turns the storyboard into a deterministic final edit:
+
+- `POST /api/production-plan` validates the same source file, optionally calls `fal-ai/video-understanding`, extracts per-segment source clips, and returns a chronological production plan
+- the production workspace lets the user inspect segment clips, change voice, choose source-audio handling, and edit narration lines
+- `POST /api/export` renders a downloadable MP4 plus JSON process report with bundled `ffmpeg-static` and `ffprobe-static`
+- if TTS is unavailable or fails, GhostCrew preserves the visual timeline and exports subtitles only
+
 ## Safety And Fallback Strategy
 
 Rejected or flagged categories:
@@ -236,6 +307,8 @@ Labels shown in the product:
 
 - `AI analysis`
 - `Demo fallback`
+- `Direct video AI`
+- `Direct video fallback`
 - `AI-generated supplementary view`
 - `Original source footage`
 
@@ -249,6 +322,8 @@ FAL_VISION_ENDPOINT_ID=openrouter/router/vision
 FAL_VISION_MODEL=google/gemini-2.5-flash
 FAL_IMAGE_EDIT_ENDPOINT_ID=fal-ai/nano-banana-2/edit
 FAL_IMAGE_EDIT_MODEL=fal-ai/nano-banana-2/edit
+FAL_TTS_ENDPOINT_ID=fal-ai/elevenlabs/tts/eleven-v3
+FAL_TTS_DEFAULT_VOICE=Rachel
 ANALYSIS_FALLBACK_ENABLED=true
 GENERATED_INSERTS_ENABLED=false
 GENERATED_INSERT_MAX_PER_TUTORIAL=1
@@ -260,26 +335,32 @@ Notes:
 
 - `FAL_KEY` is server-only.
 - `ANALYSIS_FALLBACK_ENABLED` controls whether analysis falls back to the demo provider.
+- `FAL_TTS_ENDPOINT_ID` controls narration synthesis during export.
+- `FAL_TTS_DEFAULT_VOICE` sets the default production-workspace voice.
 - `GENERATED_INSERTS_ENABLED` is the emergency kill switch for paid image generation.
 - `GENERATED_INSERT_MAX_PER_TUTORIAL` supports `1` or `2`.
 - `GENERATION_RATE_LIMIT_PER_HOUR` controls a best-effort per-IP in-memory limiter.
 - `NEXT_PUBLIC_DEMO_MODE` is UI-safe and exposes no secret.
+- If `FAL_KEY` is unset, direct video understanding falls back to the frame-based planner and export remains subtitles-only.
 
 ## Deployment Notes
 
-GhostCrew is ready for a standard Vercel deployment:
+GhostCrew is ready for a standard Vercel deployment, with ephemeral export storage by default:
 
 - Next.js App Router application
-- Node runtime for the API routes
-- no local filesystem dependency
+- Node runtime for the analysis, generation, production-plan, and export routes
+- source-segment extraction and final export use the server temp directory during rendering
+- production assets and export download URLs are held in per-instance in-memory registries
 - no dependency on the ignored local `.tools` directory in production
 - fal requests stay server-side
-- generated media uses hosted URLs returned by fal
+- generated media and TTS audio use hosted URLs returned by providers
 
 Route runtime settings:
 
 - `app/api/analyze/route.ts`: `runtime = "nodejs"`, `maxDuration = 60`
 - `app/api/generate-insert/route.ts`: `runtime = "nodejs"`, `maxDuration = 60`
+- `app/api/production-plan/route.ts`: `runtime = "nodejs"`, `maxDuration = 120`
+- `app/api/export/route.ts`: `runtime = "nodejs"`, `maxDuration = 240`
 
 Vercel deployment steps:
 
@@ -289,13 +370,18 @@ Vercel deployment steps:
 4. Add the production environment variables listed above.
 5. Set `GENERATED_INSERTS_ENABLED=false` for the first deployment if you want a safer no-credit launch, then enable it after a quick smoke test.
 6. Deploy.
-7. Run one production smoke test for real analysis and, if desired, one explicit generated-insert test.
+7. Run one production smoke test for analysis, one production-plan/export smoke test, and, if desired, one explicit generated-insert test.
 
 Best-effort rate-limiting note:
 
 - the generated-insert limiter is in-memory and per-instance
 - this is suitable for a hackathon demo but not a durable multi-instance quota system
 - `GENERATED_INSERTS_ENABLED` is the emergency server-side kill switch
+
+Export durability note:
+
+- production asset URLs and exported MP4/report URLs are instance-local and ephemeral
+- for durable multi-instance production, replace the in-memory registries with object storage
 
 ## Observed Latency And Cost
 
@@ -317,6 +403,9 @@ Observed during live smoke tests on Sunday, July 19, 2026:
 7. Review and edit the storyboard.
 8. Compare the original clip with the enhanced preview.
 9. For one `generated_insert` step, optionally request a supplementary view, review it, and accept or reject it.
+10. Build the production plan from the same source video.
+11. Review segment clips, direct-video warnings, voice choice, source-audio mode, and narration lines.
+12. Render the final MP4 and download the export report.
 
 ## Local Development
 
@@ -345,13 +434,13 @@ npm run start
 
 ## Known Limitations
 
-- analysis is frame-based, not full-video understanding
-- no narration, TTS, music, or final MP4 export
-- no persistent project storage
+- the first storyboard pass is still frame-based; full-video understanding is only used later during production planning when available
+- no persistent project storage or durable exported-asset hosting is included yet
+- no background music, soundtrack design, or multi-voice narration
 - no object tracking or 3D reconstruction
-- browser codec support still governs local playback
+- browser codec support still governs local preview playback
 - generated supplementary views are explanatory only and not physically authoritative
-- the in-memory generation limiter is best-effort in serverless environments
+- the generation limiter, production-asset registry, and export registry are best-effort in-memory mechanisms in serverless environments
 
 ## Screenshot Placeholders
 
